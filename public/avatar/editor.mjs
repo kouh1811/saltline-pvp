@@ -12,7 +12,7 @@ export function mountAvatarEditor(G,{container,triggers,getToken,onOpen,onClose}
  container.append(dialog);
  const $=s=>dialog.querySelector(s),status=$('#avatar-status');
  let renderer,scene,camera,model,raf,observer,selected=null,selectedAsset=null,phase='lobby',policy={enabled:false,customization:true,generation:true,preview:true,equipment:true,inMatch:false};
- let pending=false,pollTimer,closed=false,yaw=.25,zoom=1,drag,previewDistance=3.8,previewSerial=0,equipping=false;
+ let pending=false,pollTimer,closed=false,offline=false,yaw=.25,zoom=1,drag,previewDistance=3.8,previewSerial=0,equipping=false;
  let library=[];try{library=JSON.parse(localStorage.getItem(LIBRARY)||'[]').filter(x=>validId(x.id)&&typeof x.name==='string').slice(0,5);}catch{}
  function libraryUI(){$('#avatar-saved').replaceChildren(new Option('选择一个角色',''),...library.map(a=>new Option(a.name,a.id)));}
  libraryUI();
@@ -41,7 +41,7 @@ export function mountAvatarEditor(G,{container,triggers,getToken,onOpen,onClose}
  $('#avatar-saved').onchange=()=>{const id=$('#avatar-saved').value;if(validId(id))void preview({id});};
  $('#avatar-equip').onclick=async()=>{if(!selected||equipping)return;const asset=selected;equipping=true;controls();try{await api('/equip',{assetId:asset.id});try{localStorage.setItem(ACTIVE,asset.id);}catch{}$('#avatar-equipped').textContent='已装备 · 房间里的其他玩家现在可以看到。';}catch(e){$('#avatar-equipped').textContent=e.message;}finally{equipping=false;controls();}};
  $('#avatar-default').onclick=async()=>{if(equipping)return;try{await api('/equip',{assetId:null});try{localStorage.removeItem(ACTIVE);}catch{}$('#avatar-equipped').textContent='已恢复默认外观';}catch(e){status.textContent=e.message;}};
- async function connected(){try{updateConfig(await api('/config'));}catch{}let id;try{id=localStorage.getItem(ACTIVE);}catch{}if(validId(id)&&mayChange()&&policy.equipment){try{await api('/equip',{assetId:id});}catch(e){if(e.status===404)try{localStorage.removeItem(ACTIVE);}catch{}}}}
- function disconnected(){clearTimeout(pollTimer);policy.enabled=false;busy(false);status.textContent='连接已断开，请刷新游戏后重试';}
+ async function connected(){try{updateConfig(await api('/config'));if(offline)status.textContent='连接已恢复，可以继续使用角色工坊。';offline=false;}catch{}let id;try{id=localStorage.getItem(ACTIVE);}catch{}if(validId(id)&&mayChange()&&policy.equipment){try{await api('/equip',{assetId:id});}catch(e){if(e.status===404)try{localStorage.removeItem(ACTIVE);}catch{}}}}
+ function disconnected(){offline=true;clearTimeout(pollTimer);policy.enabled=false;busy(false);status.textContent='连接已断开，正在等待游戏重新连接…';}
  controls();return{isOpen:()=>dialog.open,connected,disconnected,updateConfig,setPhase(next){if(next!==phase){phase=next;controls();}},dispose(){closed=true;clearTimeout(pollTimer);cancelAnimationFrame(raf);observer?.disconnect();if(scene)disposeAvatar(scene);renderer?.dispose();dialog.remove();}};
 }

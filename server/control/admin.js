@@ -11,11 +11,11 @@ export class AdminController{
    if(!this.auth.enabled)return reply(res,503,{error:'管理后台未初始化：请在服务器设置至少12位 ADMIN_PASSWORD 和 ADMIN_ENCRYPTION_KEY'});
    if(path==='/login'&&method==='POST'){
     const data=await body(req);const ip=this.trustProxy?String(req.headers['x-forwarded-for']||req.socket.remoteAddress).split(',')[0].trim():req.socket.remoteAddress;
-    const s=this.auth.login(data.password,ip);res.setHeader('set-cookie',this.auth.cookie(s.token));this.store.audit('管理员登录');return reply(res,200,{csrf:s.csrf});
+    const s=this.auth.login(data.password,ip);res.setHeader('set-cookie',this.auth.cookie(s.token,false,req.isHttps));this.store.audit('管理员登录');return reply(res,200,{csrf:s.csrf});
    }
    const session=this.auth.session(req);if(!session)return reply(res,401,{error:'请先登录管理后台'});
    if(method!=='GET'&&(req.headers['x-csrf-token']!==session.csrf))return reply(res,403,{error:'登录校验已失效，请刷新页面'});
-   if(path==='/logout'&&method==='POST'){this.auth.logout(req);res.setHeader('set-cookie',this.auth.cookie('',true));return reply(res,200,{ok:true});}
+   if(path==='/logout'&&method==='POST'){this.auth.logout(req);res.setHeader('set-cookie',this.auth.cookie('',true,req.isHttps));return reply(res,200,{ok:true});}
    if(path==='/config'&&method==='GET')return reply(res,200,this.store.publicConfig());
    if(path==='/overview'&&method==='GET')return reply(res,200,{online:this.sockets.size,rooms:this.rooms.size,running:this.avatars.active,stats:this.store.stats(),currentProvider:this.store.activeProvider()?.name||'未配置',configVersion:this.store.current().version});
    if(path==='/history'&&method==='GET')return reply(res,200,{versions:this.store.history(),audit:this.store.auditLog()});
@@ -27,7 +27,7 @@ export class AdminController{
    const data=await body(req);
    if(path==='/config'&&method==='PUT'){const c=this.store.save(data,data.version);this.onConfig();return reply(res,200,c);}
    if(path==='/rollback'&&method==='POST'){const c=this.store.rollback(data.targetVersion,data.version);this.onConfig();return reply(res,200,c);}
-   if(path==='/password'&&method==='POST'){this.auth.changePassword(data.currentPassword,data.newPassword);res.setHeader('set-cookie',this.auth.cookie('',true));return reply(res,200,{ok:true});}
+   if(path==='/password'&&method==='POST'){this.auth.changePassword(data.currentPassword,data.newPassword);res.setHeader('set-cookie',this.auth.cookie('',true,req.isHttps));return reply(res,200,{ok:true});}
    if(/^\/assets\/[a-f0-9]{32}$/.test(path)&&method==='POST'){if(typeof data.disabled!=='boolean')throw Error('角色状态无效');this.store.setAssetDisabled(path.slice(8),data.disabled);this.avatars.applyPolicy();return reply(res,200,{ok:true});}
    if(path==='/tests'&&method==='POST'){
     const p=this.store.prepareProvider(data.provider);if(!p.apiKey)throw Error('请填写 API Key');

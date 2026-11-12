@@ -23,28 +23,34 @@ window.installPvp=async function(G){
  let saved='';try{saved=localStorage.getItem('saltline.callsign')||'';}catch{}$('#nickname').value=saved;$('#room-code').value=new URLSearchParams(location.search).get('room')||'';
  let avatarEditor=null,avatarToken=null;
  let socket,id=null,state=null,own=null,spawnSerial=-1,round=-1,connected=false,sendAt=0,scoreOpen=false,offset=0,lastMessage=performance.now(),ping=0,joining=false;
- const remotes=new Map();let lastLocalShot=-Infinity;
+ const RESUME_GRACE_MS=45000,RESUME_KEY='saltline.resume';let resumeToken=null,reconnectUntil=0,retryTimer,deadlineTimer,handshakeTimer,attempt=0,intentional=false,clockReady=false;
+ try{resumeToken=sessionStorage.getItem(RESUME_KEY);}catch{}if(resumeToken)reconnectUntil=Date.now()+RESUME_GRACE_MS;
+ const remotes=new Map(),correction=new T.Vector3();let lastLocalShot=-Infinity;
+ function saveToken(token){resumeToken=token;try{if(token)sessionStorage.setItem(RESUME_KEY,token);else sessionStorage.removeItem(RESUME_KEY);}catch{}}
+ function clockSample(sample,weight=.15){if(!Number.isFinite(sample))return;offset=clockReady?offset+(sample-offset)*weight:sample;clockReady=true;}
  const status=message=>{$('#status').textContent=message;};
  const send=data=>{if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(data));};
  const nameFor=pid=>state?.players.find(p=>p.id===pid)?.name||'玩家';
- function setControls(enabled){enabled=enabled&&!avatarEditor?.isOpen();G.player.enabled=enabled;G.input.setGameplay?.(enabled);G.weapon.debug.noFire=!enabled;}
+ function setControls(enabled){enabled=enabled&&connected&&!avatarEditor?.isOpen();G.player.enabled=enabled;G.input.setGameplay?.(enabled);G.weapon.debug.noFire=!enabled;}
  function unlock(){G.input.exitLock?.();}
  function capture(){if(avatarEditor?.isOpen()||!connected||state?.phase!=='playing'||!own?.alive)return;G.audio.resume?.();G.input.requestLock?.();setControls(true);$('#resume-game').hidden=true;}
  const game={state:'lobby',start(){},update(dt){
   const reserve=document.querySelector('.h-ammo-r');if(reserve)reserve.textContent='∞';
-  if(state?.phase==='playing'){
+  if(connected&&state?.phase==='playing'){
    const now=Date.now()+offset;const remaining=Math.max(0,Math.ceil((state.endsAt-now)/1000));$('#clock').textContent=`${String(Math.floor(remaining/60)).padStart(2,'0')}:${String(remaining%60).padStart(2,'0')}`;
    if(own&&!own.alive){$('#death-notice').hidden=false;$('#death-notice').textContent=`信号中断 · ${Math.max(1,Math.ceil((own.respawnAt-now)/1000))} 秒后重返战场`;}
    if(performance.now()>sendAt){sendAt=performance.now()+33;sendInput();}
   }
-  for(const remote of remotes.values()){
-   remote.root.position.lerp(remote.target,1-Math.exp(-14*dt));const diff=Math.atan2(Math.sin(remote.yaw-remote.root.rotation.y),Math.cos(remote.yaw-remote.root.rotation.y));remote.root.rotation.y+=diff*(1-Math.exp(-16*dt));
+  if(connected&&own?.alive&&state?.phase==='playing'&&correction.lengthSq()>0){const step=correction.clone().multiplyScalar(1-Math.exp(-10*dt));G.player.pos.add(step);correction.sub(step);}
+  if(connected)for(const remote of remotes.values()){
+   const seconds=remote.connected?Math.min(.1,Math.max(0,(performance.now()-remote.receivedAt)/1000)):0;const ahead=remote.velocity.clone().multiplyScalar(seconds).clampLength(0,.6);remote.extrapolated.copy(remote.target).add(ahead);
+   remote.root.position.lerp(remote.extrapolated,1-Math.exp(-14*dt));const diff=Math.atan2(Math.sin(remote.yaw-remote.root.rotation.y),Math.cos(remote.yaw-remote.root.rotation.y));remote.root.rotation.y+=diff*(1-Math.exp(-16*dt));
    if(remote.avatarObject)remote.avatarObject.scale.y=remote.avatarObject.userData.baseScaleY*(remote.crouching?.63:1);
    remote.body.scale.y=remote.crouching?.63:1;remote.head.position.y=remote.crouching?1.02:1.56;remote.gun.position.y=remote.crouching?.8:1.15;
    remote.ring.visible=remote.protectedUntil>Date.now()+offset;
    const moving=remote.root.position.distanceTo(remote.previous)>.002;remote.phase+=dt*(moving?10:0);remote.legs[0].rotation.x=moving?Math.sin(remote.phase)*.45:0;remote.legs[1].rotation.x=-remote.legs[0].rotation.x;remote.previous.copy(remote.root.position);
   }
-  $('#net-status').textContent=connected?(performance.now()-lastMessage>3000?'网络不稳定':`${ping} ms`):'连接已断开';
+  $('#net-status').textContent=connected?(performance.now()-lastMessage>3000?'网络不稳定':`${ping} ms`):reconnectUntil?'正在重新连接…':'连接已断开';
   return connected&&state?.phase==='playing';
  }};G.game=game;
  G.enemies.clear();G.enemies.update=()=>{};G.enemies.raycast=()=>null;
@@ -54,9 +60,9 @@ window.installPvp=async function(G){
  G.camera.position.set(-32,2.1,6);G.camera.lookAt(0,3,0);
  G.render.post.fade=0;
  const originalShot=G.combat.playerShot.bind(G.combat);
- G.combat.playerShot=(origin,dir,options)=>{sendInput();send({type:'fire',dir:dir.toArray()});lastLocalShot=performance.now();return originalShot(origin,dir,options);};
+ G.combat.playerShot=(origin,dir,options)=>{sendInput();send({type:'fire',dir:dir.toArray(),shotTime:Date.now()+offset,rtt:ping});lastLocalShot=performance.now();return originalShot(origin,dir,options);};
  G.events.on('weapon:reload',event=>{if(event.phase==='start')send({type:'reload'});});
- function sendInput(){if(!connected||state?.phase!=='playing'||!own?.alive)return;const enabled=G.player.enabled&&!document.hidden;send({type:'input',move:enabled?[G.input.move.x,G.input.move.y]:[0,0],yaw:G.player.yaw,pitch:G.player.pitch,jump:enabled&&G.input.pressed('jump'),sprint:enabled&&G.input.sprint,ads:enabled&&G.input.ads,crouch:enabled&&G.input.crouch});}
+ function sendInput(){if(!connected||state?.phase!=='playing'||!own?.alive)return;const enabled=G.player.enabled&&!document.hidden;send({type:'input',rtt:ping,move:enabled?[G.input.move.x,G.input.move.y]:[0,0],yaw:G.player.yaw,pitch:G.player.pitch,jump:enabled&&G.input.pressed('jump'),sprint:enabled&&G.input.sprint,ads:enabled&&G.input.ads,crouch:enabled&&G.input.crouch});}
  // Jump presses can be shorter than the network cadence; latch them every frame.
  const baseUpdate=game.update;game.update=dt=>{if(G.player.enabled&&G.input.pressed('jump'))sendInput();return baseUpdate(dt);};
  function disposeRemote(remote){remote.disposed=true;G.scene.remove(remote.root);disposeAvatar(remote.root);}
@@ -78,21 +84,21 @@ window.installPvp=async function(G){
   const gun=add(new T.BoxGeometry(.12,.15,.68),dark,[.28,1.15,-.4]);
   const ring=add(new T.TorusGeometry(.55,.018,5,32),glow,[0,.06,0]);ring.rotation.x=Math.PI/2;
   const canvas=document.createElement('canvas');canvas.width=256;canvas.height=48;const ctx=canvas.getContext('2d');ctx.fillStyle='#101c24cc';ctx.fillRect(0,0,256,48);ctx.fillStyle='#f0e9dd';ctx.font='22px sans-serif';ctx.textAlign='center';ctx.fillText(p.name,128,32);const sprite=new T.Sprite(new T.SpriteMaterial({map:new T.CanvasTexture(canvas),depthTest:true}));sprite.scale.set(1.8,.34,1);sprite.position.y=2.1;root.add(sprite);
-  root.position.fromArray(p.pos);G.scene.add(root);return {root,body,head,legs,gun,ring,defaultVisuals:root.children.filter(o=>o!==gun&&o!==ring&&o!==sprite),wantedAvatar:null,avatarId:null,avatarObject:null,target:new T.Vector3(...p.pos),yaw:p.yaw,previous:root.position.clone(),phase:0};
+  root.position.fromArray(p.pos);G.scene.add(root);return {root,body,head,legs,gun,ring,defaultVisuals:root.children.filter(o=>o!==gun&&o!==ring&&o!==sprite),wantedAvatar:null,avatarId:null,avatarObject:null,target:new T.Vector3(...p.pos),extrapolated:new T.Vector3(...p.pos),velocity:new T.Vector3(),receivedAt:performance.now(),connected:p.connected,yaw:p.yaw,previous:root.position.clone(),phase:0};
  }
  function updateScoreboard(){const tbody=$('#score-rows');tbody.replaceChildren();for(const p of [...state.players].sort((a,b)=>b.kills-a.kills||a.deaths-b.deaths||a.name.localeCompare(b.name))){const row=document.createElement('tr');if(p.id===id)row.className='self';for(const value of [p.name+(p.id===id?' · 你':''),p.kills,p.deaths]){const cell=document.createElement('td');cell.textContent=String(value);row.append(cell);}tbody.append(row);}}
  function onState(next){
-  const prev=state;state=next;avatarEditor?.setPhase(next.phase);offset=next.now-Date.now();own=next.players.find(p=>p.id===id);if(!own)return;
-  $('#live-code').textContent=next.code;$('#population').textContent=`${next.players.length}/4 在线`;$('#code').textContent=next.code;
-  $('#roster').replaceChildren();for(const p of next.players){const row=document.createElement('div');row.className='roster-player';row.textContent=`${p.name}${p.id===id?' · 你':''}${p.id===next.host?' · 房主':''}`;$('#roster').append(row);}
+  const prev=state;state=next;avatarEditor?.setPhase(next.phase);clockSample(next.now+ping/2-Date.now(),.02);own=next.players.find(p=>p.id===id);if(!own)return;
+  $('#live-code').textContent=next.code;$('#population').textContent=`${next.players.filter(p=>p.connected).length}/4 在线`;$('#code').textContent=next.code;
+  $('#roster').replaceChildren();for(const p of next.players){const row=document.createElement('div');row.className='roster-player';row.textContent=`${p.name}${p.id===id?' · 你':''}${p.id===next.host?' · 房主':''}${p.connected?'':' · 掉线中'}`;$('#roster').append(row);}
   $('#start-game').hidden=id!==next.host;$('#start-game').disabled=next.players.length<2;$('#wait-hint').textContent=next.players.length<2?'等待朋友加入，至少 2 人才能开始。':id===next.host?'所有玩家已就位，由你开始。':'等待房主开始对局。';
-  for(const p of next.players){if(p.id===id)continue;let remote=remotes.get(p.id);if(!remote){remote=makeRemote(p);remotes.set(p.id,remote);}if(remote.wantedAvatar!==(p.avatarId||null))void updateAppearance(remote,p.avatarId||null);if(remote.spawnSerial!==p.spawnSerial){remote.root.position.fromArray(p.pos);remote.spawnSerial=p.spawnSerial;}remote.target.fromArray(p.pos);remote.yaw=p.yaw;remote.crouching=p.crouching;remote.protectedUntil=p.protectedUntil;remote.root.visible=p.alive&&next.phase==='playing';}
+  for(const p of next.players){if(p.id===id)continue;let remote=remotes.get(p.id);if(!remote){remote=makeRemote(p);remotes.set(p.id,remote);}if(remote.wantedAvatar!==(p.avatarId||null))void updateAppearance(remote,p.avatarId||null);if(remote.spawnSerial!==p.spawnSerial){remote.root.position.fromArray(p.pos);remote.spawnSerial=p.spawnSerial;}remote.target.fromArray(p.pos);remote.velocity.fromArray(p.vel);remote.connected=p.connected;remote.receivedAt=performance.now();remote.yaw=p.yaw;remote.crouching=p.crouching;remote.protectedUntil=p.protectedUntil;remote.root.visible=p.alive&&next.phase==='playing';}
   for(const [pid,remote] of remotes)if(!next.players.some(p=>p.id===pid)){disposeRemote(remote);remotes.delete(pid);}
   if(next.phase==='playing'){
    const newRound=round!==next.round;const respawn=spawnSerial!==own.spawnSerial;
-   if(newRound||respawn){round=next.round;spawnSerial=own.spawnSerial;G.player.reset({pos:new T.Vector3(...own.pos),yaw:own.yaw});G.weapon.reset();G.weapon.reserve=9999;G.weapon.setVisible(true);G.hud.reset?.();G.hud.show(true);$('#death-notice').hidden=true;$('#scoreboard').hidden=true;scoreOpen=false;setControls(true);}
-   // Local prediction is corrected only when error exceeds a small tolerance.
-   const authoritative=new T.Vector3(...own.pos);if(own.alive&&G.player.pos.distanceTo(authoritative)>.65){G.player.pos.copy(authoritative);G.player.vel.fromArray(own.vel);}
+   if(newRound||respawn){round=next.round;spawnSerial=own.spawnSerial;G.player.reset({pos:new T.Vector3(...own.pos),yaw:own.yaw});G.weapon.reset();G.weapon.reserve=9999;G.weapon.setVisible(true);G.hud.reset?.();G.hud.show(true);$('#death-notice').hidden=true;$('#scoreboard').hidden=true;scoreOpen=false;setControls(true);$('#resume-game').hidden=!!G.input.locked||G.input.touch;}
+   // Ignore tiny drift, spread moderate correction across frames, snap only large errors.
+   const authoritative=new T.Vector3(...own.pos),error=G.player.pos.distanceTo(authoritative);correction.set(0,0,0);if(own.alive){if(error>1.2){G.player.pos.copy(authoritative);G.player.vel.fromArray(own.vel);}else if(error>.08)correction.copy(authoritative).sub(G.player.pos);}
    if(own.health<G.player.health){G.player.addShake(.35);G.events.emit('player:hit',{amount:G.player.health-own.health,fromPos:null});}
    G.player.health=own.health;G.player.alive=own.alive;
    if(G.weapon.state==='idle'&&performance.now()-lastLocalShot>250&&!own.reloadAt)G.weapon.ammo=own.ammo;
@@ -100,25 +106,48 @@ window.installPvp=async function(G){
    game.state='playing';$('#lobby').hidden=true;$('#match-strip').hidden=false;$('#live-score').hidden=false;$('#live-score').textContent=`${own.kills} 击杀 / ${own.deaths} 阵亡`;
    if(newRound){$('#score-title').textContent='战场记录';$('#winner').textContent='';$('#rematch').hidden=true;$('#return-lobby').hidden=true;setControls(true);$('#resume-game').hidden=!!G.input.locked||G.input.touch;}
   }else if(next.phase==='finished'){
-   game.state='finished';$('#clock').textContent='00:00';setControls(false);G.weapon.setVisible(false);unlock();$('#death-notice').hidden=true;$('#resume-game').hidden=true;$('#scoreboard').hidden=false;$('#score-title').textContent='本局结束';$('#rematch').hidden=id!==next.host;$('#return-lobby').hidden=false;$('#rematch').disabled=next.players.length<2;
+   game.state='finished';$('#lobby').hidden=true;$('#match-strip').hidden=false;$('#clock').textContent='00:00';setControls(false);G.weapon.setVisible(false);unlock();$('#death-notice').hidden=true;$('#resume-game').hidden=true;$('#scoreboard').hidden=false;$('#score-title').textContent='本局结束';$('#rematch').hidden=id!==next.host;$('#return-lobby').hidden=false;$('#rematch').disabled=next.players.length<2;
    const max=Math.max(...next.players.map(p=>p.kills));const winners=next.players.filter(p=>p.kills===max).map(p=>p.name);$('#winner').textContent=`${winners.join('、')}${winners.length>1?' 并列第一':' 获胜'} · ${max} 击杀`;
   }else{game.state='lobby';setControls(false);$('#lobby').hidden=false;$('#room-info').hidden=false;}
   updateScoreboard();
  }
  function feed(message){const line=document.createElement('div');line.textContent=message;$('#kill-feed').prepend(line);setTimeout(()=>line.remove(),5500);while($('#kill-feed').children.length>4)$('#kill-feed').lastChild.remove();}
  function onShot(event){if(event.id!==id){G.fx.tracer?.(new T.Vector3(...event.origin),new T.Vector3(...event.end));}else{if(event.target)G.hud.hitmarker?.(event.killed?'kill':'hit');}if(event.killed)feed(`${nameFor(event.id)}  ›  ${nameFor(event.target)}`);}
- function connect(){socket=new WebSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/ws`);window.__pvp={get socket(){return socket;},get state(){return state;},get id(){return id;},get remotes(){return remotes;}};
-  socket.onopen=()=>{connected=true;status('服务器已连接 · 创建房间或输入房间码');$('#create-room').disabled=false;$('#join-room').disabled=false;};
-  socket.onmessage=event=>{lastMessage=performance.now();const data=JSON.parse(event.data);if(data.type==='hello'){id=data.id;avatarToken=data.avatarToken;void avatarEditor?.connected();}else if(data.type==='avatarConfig'){avatarEditor?.updateConfig(data.config);}else if(data.type==='joined'){joining=false;$('#connect-form').hidden=true;$('#room-info').hidden=false;status('分享邀请链接，让朋友进入同一个港口。');const url=new URL(location.href);url.searchParams.set('room',data.code);history.replaceState(null,'',url);}else if(data.type==='state')onState(data);else if(data.type==='shot')onShot(data);else if(data.type==='pong')ping=Math.max(0,Math.round(performance.now()-data.sent));else if(data.type==='error'){joining=false;status(data.message);}};
-  socket.onclose=()=>{avatarToken=null;avatarEditor?.disconnected();connected=false;joining=false;setControls(false);unlock();$('#resume-game').hidden=true;$('#death-notice').hidden=true;$('#lobby').hidden=false;$('#connect-form').hidden=true;$('#room-info').hidden=true;$('#scoreboard').hidden=true;status('连接已断开，请刷新页面后重新加入房间。');const button=document.createElement('button');button.textContent='重新连接';button.onclick=()=>location.reload();$('#status').append(document.createElement('br'),button);};
-  socket.onerror=()=>status('无法连接服务器，请确认服务器已启动。');
+ function resumeFailed(message='房间已失效，请返回大厅。'){
+  clearTimeout(retryTimer);clearTimeout(deadlineTimer);clearTimeout(handshakeTimer);reconnectUntil=0;intentional=true;saveToken(null);connected=false;setControls(false);unlock();avatarToken=null;avatarEditor?.disconnected();socket?.close();$('#lobby').hidden=false;$('#connect-form').hidden=true;$('#room-info').hidden=true;$('#scoreboard').hidden=true;status(message);const button=document.createElement('button');button.textContent='返回大厅';button.onclick=leave;$('#status').append(document.createElement('br'),button);
  }
+ function scheduleReconnect(){
+  if(intentional)return;if(!reconnectUntil){reconnectUntil=Date.now()+RESUME_GRACE_MS;deadlineTimer=setTimeout(()=>resumeFailed(),RESUME_GRACE_MS);}if(Date.now()>=reconnectUntil){resumeFailed();return;}
+  status('正在重新连接…');retryTimer=setTimeout(connect,Math.min(8000,500*2**Math.min(attempt++,4),reconnectUntil-Date.now()));
+ }
+ function connect(){
+  if(intentional)return;const ws=socket=new WebSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/ws`);window.__pvp={get socket(){return socket;},get state(){return state;},get id(){return id;},get remotes(){return remotes;}};
+  $('#create-room').disabled=true;$('#join-room').disabled=true;
+  clearTimeout(handshakeTimer);handshakeTimer=setTimeout(()=>ws.close(),4000);
+  ws.onmessage=event=>{if(ws!==socket||intentional)return;lastMessage=performance.now();const data=JSON.parse(event.data);
+   if(data.type==='hello'){
+    if(resumeToken){send({type:'resume',token:resumeToken});return;}
+    clearTimeout(handshakeTimer);id=data.id;avatarToken=data.avatarToken;connected=true;attempt=0;reconnectUntil=0;clearTimeout(deadlineTimer);status('服务器已连接 · 创建房间或输入房间码');$('#create-room').disabled=false;$('#join-room').disabled=false;void avatarEditor?.connected();
+   }else if(data.type==='avatarConfig'){avatarEditor?.updateConfig(data.config);}
+   else if(data.type==='joined'||data.type==='resumed'){
+    clearTimeout(handshakeTimer);clearTimeout(deadlineTimer);clearTimeout(retryTimer);id=data.id;saveToken(data.resumeToken);connected=true;joining=false;attempt=0;reconnectUntil=0;
+    if(data.type==='resumed'){avatarToken=data.avatarToken;spawnSerial=-1;void avatarEditor?.connected();}
+    $('#connect-form').hidden=true;$('#room-info').hidden=false;status('分享邀请链接，让朋友进入同一个港口。');const url=new URL(location.href);url.searchParams.set('room',data.code);history.replaceState(null,'',url);
+   }else if(data.type==='state')onState(data);else if(data.type==='shot')onShot(data);
+   else if(data.type==='pong'){ping=Math.max(0,Math.round(performance.now()-data.sent));clockSample(data.serverTime+ping/2-Date.now());}
+   else if(data.type==='error'){joining=false;if(resumeToken&&!connected)resumeFailed(data.message);else status(data.message);}
+  };
+  ws.onclose=event=>{if(ws!==socket||intentional)return;clearTimeout(handshakeTimer);avatarToken=null;avatarEditor?.disconnected();connected=false;joining=false;setControls(false);unlock();$('#resume-game').hidden=true;if(event.code===4001){resumeFailed('此玩家已在另一个连接恢复，请返回大厅。');return;}scheduleReconnect();};
+  ws.onerror=()=>status('正在重新连接…');
+ }
+ function leave(){intentional=true;saveToken(null);clearTimeout(retryTimer);clearTimeout(deadlineTimer);clearTimeout(handshakeTimer);send({type:'leave'});connected=false;setControls(false);const done=()=>{location.href=location.pathname;};if(socket?.readyState===WebSocket.OPEN){const onLeft=event=>{if(JSON.parse(event.data).type==='left'){socket.removeEventListener('message',onLeft);done();}};socket.addEventListener('message',onLeft);setTimeout(done,300);}else done();}
+ if(reconnectUntil)deadlineTimer=setTimeout(()=>resumeFailed(),RESUME_GRACE_MS);
  $('#create-room').onclick=()=>join('create');$('#join-room').onclick=()=>join('join');
  function join(type){if(!connected||joining)return;const name=$('#nickname').value.trim()||'无名干员';const code=$('#room-code').value.trim().toUpperCase();if(type==='join'&&!/^[A-F0-9]{6}$/.test(code)){status('请输入完整的 6 位房间码');return;}joining=true;try{localStorage.setItem('saltline.callsign',name);}catch{}send({type,name,code});}
- $('#start-game').onclick=()=>{G.audio.resume?.();send({type:'start'});};$('#rematch').onclick=()=>send({type:'start'});$('#return-lobby').onclick=()=>{location.href=location.pathname;};
+ $('#start-game').onclick=()=>{G.audio.resume?.();send({type:'start'});};$('#rematch').onclick=()=>send({type:'start'});$('#return-lobby').onclick=leave;
  $('#copy-room').onclick=async()=>{try{await navigator.clipboard.writeText(location.href);status('邀请链接已复制');}catch{status(`复制地址栏链接即可邀请 · 房间码 ${state.code}`);}};
  $('#resume-game').onclick=capture;G.renderer.domElement.addEventListener('click',()=>{if(own?.alive&&!scoreOpen)capture();});
- $('#leave-game').onclick=()=>{socket.close();location.href=location.pathname;};
+ $('#leave-game').onclick=leave;
  $('#quality').value=G.quality.name;$('#quality').onchange=()=>{const url=new URL(location.href);url.searchParams.set('q',$('#quality').value);location.href=url.href;};
  $('#show-scores').onclick=()=>{scoreOpen=!scoreOpen;$('#scoreboard').hidden=!scoreOpen;if(scoreOpen){setControls(false);unlock();}};
  addEventListener('keydown',e=>{if(e.code==='Tab'&&state?.phase==='playing'&&!avatarEditor?.isOpen()){e.preventDefault();scoreOpen=true;$('#scoreboard').hidden=false;}if(e.code==='Escape'&&state?.phase==='playing'){setControls(false);$('#resume-game').hidden=!own?.alive;}});

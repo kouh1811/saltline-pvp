@@ -20,3 +20,26 @@ test('v2 geometry, world transforms, materials and seeded instanced details matc
 });
 test('v3 repeated parts and eyes batch without changing expanded budget',()=>{const r=recipe({shape:'eye',mirror:true,repeat:{count:4,axis:'y',angle:6.28}}),root=createAvatar(T,r);let batches=0,draws=0;root.traverse(o=>{if(o.isMesh){draws++;if(o.isInstancedMesh){batches++;assert.equal(o.count,4);const matrix=new T.Matrix4();for(let i=0;i<o.count;i++){o.getMatrixAt(i,matrix);assert.ok(matrix.determinant()>0);};}}});assert.equal(root.userData.parts,8);assert.equal(batches,8);assert.equal(draws,8);disposeAvatar(root);});
 test('serialized byte boundary counts UTF-8 bytes exactly, and v3 requires explicit version',()=>{const r={...recipe({shape:'box'}),version:2};r.nodes[0].points='';const size=new TextEncoder().encode(JSON.stringify(r)).length;r.nodes[0].points='x'.repeat(LIMITS.bytes-size);validate(r);r.nodes[0].points+='x';assert.throws(()=>validate(r),/bytes budget/);assert.throws(()=>validate({...recipe(),version:2}),/version 3/);});
+
+import {createGameServer} from '../server/index.js';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+
+test('serves v3 quality and surface modules', async () => {
+  const dir=await mkdtemp(join(tmpdir(),'saltline-static-'));
+  const app=createGameServer({controlDbPath:':memory:',avatarDataDir:dir});
+  await new Promise(r=>app.server.listen(0,'127.0.0.1',r));
+  const base='http://127.0.0.1:'+app.server.address().port;
+  try {
+    for (const path of ['/avatar/quality.mjs','/avatar/surfaces.mjs','/avatar/schema.mjs','/avatar/renderer.mjs']) {
+      const res=await fetch(base+path);
+      assert.equal(res.status,200,path);
+      assert.match(res.headers.get('content-type')||'',/javascript/);
+      assert.ok((await res.text()).length>100,path);
+    }
+  } finally {
+    await app.close();
+    await rm(dir,{recursive:true,force:true});
+  }
+});

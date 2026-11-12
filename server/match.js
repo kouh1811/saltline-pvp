@@ -40,5 +40,5 @@ export class Match{
    movePlayer(p,Math.min(dt,.05),this.map);
   }
  }
- snapshot(now){return {type:'state',code:this.code,host:this.host,phase:this.phase,round:this.round,now,endsAt:this.endsAt,players:[...this.players.values()].map(({id,name,pos,vel,health,alive,kills,deaths,ammo,reloadAt,respawnAt,protectedUntil,spawnSerial,crouching,input})=>({id,name,pos,vel,health,alive,kills,deaths,ammo,reloadAt,respawnAt,protectedUntil,spawnSerial,crouching,yaw:input.yaw,pitch:input.pitch}))};}
+ snapshot(now){return {type:'state',code:this.code,host:this.host,phase:this.phase,round:this.round,now,endsAt:this.endsAt,players:[...this.players.values()].map(({id,name,pos,vel,health,alive,kills,deaths,ammo,reloadAt,respawnAt,protectedUntil,spawnSerial,crouching,input,avatarId=null})=>({id,name,pos,vel,health,alive,kills,deaths,ammo,reloadAt,respawnAt,protectedUntil,spawnSerial,crouching,avatarId,yaw:input.yaw,pitch:input.pitch}))};}
 }

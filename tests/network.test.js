@@ -9,7 +9,7 @@ test('real sockets: create, join, start, movement, room isolation and disconnect
  c.send({type:'create',name:'Other'});const other=await c.wait('joined');assert.notEqual(other.code,joined.code);
  a.send({type:'start'});const initial=await a.wait('state',s=>s.phase==='playing');assert.equal(initial.players.length,2);assert.equal((await c.wait('state')).players.length,1);
  const me=initial.players.find(p=>p.id===joined.id);a.send({type:'input',move:[1,0],yaw:0,pitch:0});const moved=await b.wait('state',s=>s.phase==='playing'&&Math.abs(s.players.find(p=>p.id===joined.id).pos[0]-me.pos[0])>.03);assert.ok(moved.players.every(p=>p.health===100));
- b.ws.close();await a.wait('state',s=>s.players.length===1);a.ws.close();c.ws.close();
+ b.send({type:'leave'});await a.wait('state',s=>s.players.length===1);b.ws.close();a.ws.close();c.ws.close();
  }finally{await app.close();}
 });
 test('real sockets: authoritative kill, three-second respawn, expiry and rematch',async()=>{
@@ -21,4 +21,24 @@ test('real sockets: authoritative kill, three-second respawn, expiry and rematch
  const reborn=await b.wait('state',s=>s.players.find(p=>p.id===bj.id).alive&&s.players.find(p=>p.id===bj.id).spawnSerial>killed.players.find(p=>p.id===bj.id).spawnSerial);const p=reborn.players.find(p=>p.id===bj.id);assert.equal(p.health,100);assert.ok(p.protectedUntil>reborn.now);
  room.endsAt=Date.now()-1;await a.wait('state',s=>s.phase==='finished');a.send({type:'start'});const next=await b.wait('state',s=>s.phase==='playing'&&s.round===2);assert.ok(next.players.every(p=>p.kills===0&&p.health===100));a.ws.close();b.ws.close();
  }finally{await app.close();}
+});
+
+test('resume preserves match identity, rejects forgery/new joins, replaces socket and rotates avatar token',async()=>{
+ const app=createGameServer({controlDbPath:':memory:'});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${app.server.address().port}`,url=base.replace('http','ws')+'/ws';
+ try{const a=await connect(url),b=await connect(url);const ah=await a.wait('hello');a.send({type:'create',name:'A'});const aj=await a.wait('joined');assert.match(aj.resumeToken,/^[a-f0-9]{64}$/);b.send({type:'join',code:aj.code,name:'B'});const bj=await b.wait('joined');assert.ok(!JSON.stringify(await b.wait('state')).includes(aj.resumeToken));a.send({type:'start'});await b.wait('state',s=>s.phase==='playing');const room=app.rooms.get(aj.code),p=room.players.get(aj.id);p.kills=2;p.input.move=[0,0];
+ a.ws.terminate();const lost=await b.wait('state',s=>s.players.some(p=>p.id===aj.id&&p.connected===false));assert.equal(lost.host,aj.id);const pos=[...p.pos];
+ const c=await connect(url);const ch=await c.wait('hello');c.send({type:'resume',token:'f'.repeat(64)});await c.wait('error');c.send({type:'join',code:aj.code,name:'C'});await c.wait('error');c.send({type:'resume',token:aj.resumeToken});const resumed=await c.wait('resumed');assert.equal(resumed.id,aj.id);assert.notEqual(resumed.avatarToken,ah.avatarToken);assert.equal((await c.wait('state',s=>s.players.some(p=>p.id===aj.id&&p.connected))).players.find(p=>p.id===aj.id).kills,2);assert.deepEqual(p.pos,pos);
+ for(const token of [ah.avatarToken,ch.avatarToken])assert.equal((await fetch(base+'/api/avatars/config',{headers:{authorization:'Bearer '+token}})).status,401);assert.equal((await fetch(base+'/api/avatars/config',{headers:{authorization:'Bearer '+resumed.avatarToken}})).status,200);
+ const d=await connect(url),closed=new Promise(r=>c.ws.once('close',r));d.send({type:'resume',token:aj.resumeToken});await d.wait('resumed');await closed;assert.equal(room.players.size,2);assert.equal(room.players.get(aj.id).connected,true);
+ d.send({type:'ping',sent:123});const pong=await d.wait('pong');assert.equal(pong.sent,123);assert.ok(Math.abs(pong.serverTime-Date.now())<1000);
+ d.send({type:'leave'});await b.wait('state',s=>s.players.length===1);assert.equal(room.host,bj.id);d.send({type:'resume',token:aj.resumeToken});await d.wait('error');d.ws.close();b.ws.close();
+ }finally{await app.close();}
+});
+test('resume grace expires, invalidates token and deletes empty room',async()=>{
+ const app=createGameServer({controlDbPath:':memory:',resumeGraceMs:80});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const url=`ws://127.0.0.1:${app.server.address().port}/ws`;
+ try{const a=await connect(url);a.send({type:'create'});const joined=await a.wait('joined');a.ws.terminate();await new Promise(r=>setTimeout(r,150));assert.equal(app.rooms.size,0);const b=await connect(url);b.send({type:'resume',token:joined.resumeToken});await b.wait('error');b.ws.close();}finally{await app.close();}
+});
+test('expired disconnected host is removed and host transfers to remaining player',async()=>{
+ const app=createGameServer({controlDbPath:':memory:',resumeGraceMs:150});await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const url=`ws://127.0.0.1:${app.server.address().port}/ws`;
+ try{const a=await connect(url),b=await connect(url);a.send({type:'create'});const joined=await a.wait('joined');b.send({type:'join',code:joined.code});const bj=await b.wait('joined');a.ws.terminate();const lost=await b.wait('state',s=>s.players.some(p=>p.id===joined.id&&!p.connected));assert.equal(lost.host,joined.id);const expired=await b.wait('state',s=>s.players.length===1);assert.equal(expired.host,bj.id);const c=await connect(url);c.send({type:'resume',token:joined.resumeToken});await c.wait('error');b.ws.close();c.ws.close();}finally{await app.close();}
 });

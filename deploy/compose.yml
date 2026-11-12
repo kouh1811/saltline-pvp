@@ -1,0 +1,42 @@
+# From the repo root: DOMAIN=your-domain docker compose -f deploy/compose.yml up -d
+# Supply private environment values through ../.env; never commit that file.
+services:
+  game:
+    image: node:24-alpine
+    working_dir: /app
+    command: sh -c 'npm ci --omit=dev && node server/index.js'
+    environment:
+      PORT: 18453
+      TRUST_PROXY: 1
+      TLS_CERT: ''
+      TLS_KEY: ''
+      ADMIN_COOKIE_SECURE: 0
+      npm_config_cache: /tmp/npm-cache
+    env_file: ../.env
+    volumes:
+      - ../:/app:ro
+      - node_modules:/app/node_modules
+      - game_data:/app/server/data
+    expose:
+      - '18453'
+    restart: unless-stopped
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN to your public hostname}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - game
+    restart: unless-stopped
+volumes:
+  node_modules:
+  game_data:
+  caddy_data:
+  caddy_config:

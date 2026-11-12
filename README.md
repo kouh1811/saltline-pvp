@@ -27,7 +27,22 @@ npm start
 
 公网游玩需要一台能够持续运行 Node.js 的主机，并通过 HTTPS 反向代理同时转发网页与 `/ws` 的 WebSocket 升级请求。这个项目不能只上传静态 HTML 就实现联机。当前没有部署到公网，也未验证跨公网网络条件。
 
-服务器重启会清空房间和战绩。断线后页面提示重新连接，刷新后重新加入；进行中的房间暂不支持中途加入或断线恢复。第一版没有账号、持久化排行、匹配队列、聊天或观战系统。
+服务器重启会清空房间和战绩。普通断线保留玩家 45 秒，名单显示“掉线中”，房主身份保留；本标签页自动按约 0.5、1、2、4、8 秒退避重连，刷新也会使用 sessionStorage 中的恢复凭证。恢复后沿用原 id、战绩和角色外观，继续大厅、对局或结算；重连期间暂停操作并保留最后画面。角色仍留在战场，可受伤或复活。超时离房，主动“退出”或结算“返回大厅”立即离房并清除凭证。新玩家仍不能在进行中的对局加入。同一凭证恢复会顶替旧连接；不要分享恢复凭证。没有账号、持久化排行、匹配队列、聊天或观战系统。
+
+### HTTPS 部署示例
+
+本地默认继续使用 `http://localhost:18453`，无需证书。公网先将域名 DNS 指向主机、放通 80/443，参考 `deploy/Caddyfile` 与 `deploy/compose.yml`：
+
+```sh
+cp .env.example .env
+# 编辑 .env 配置管理员及所需接口；证书和私钥均留在仓库外
+export DOMAIN=你的公网域名
+docker compose -f deploy/compose.yml up -d
+```
+
+此命令仅供自行部署参考，本批未执行部署。Caddy 自动申请证书，反代网页和 `/ws`（自动支持升级）；Node 服务只在容器网络暴露 18453，不映射公网端口。数据保存于命名卷。代理后使用 `TRUST_PROXY=1`，仅信任会覆盖 `X-Forwarded-For` 和 `X-Forwarded-Proto` 的自有代理，并阻止绕过代理访问 Node。邀请时从 `https://` 地址复制链接，客户端自动使用 `wss://`。Let’s Encrypt 不能为纯 IP 签发证书；没有域名先继续本地 HTTP，不要强行部署公网 HTTPS。
+
+也可以直接设置 `TLS_CERT`、`TLS_KEY` 为仓库外的 PEM 文件路径（必须同时设置），Node 会创建 HTTPS 服务；`PORT` 仍默认 18453。程序调用支持 `createGameServer({tls:{cert,key}})`，接受字符串或 Buffer。管理员 Cookie 在真实 TLS 或 `TRUST_PROXY=1` 且 `X-Forwarded-Proto=https` 时自动带 Secure，本地 HTTP 不需要更改配置。`HSTS=1` 可在这些 HTTPS 响应上启用一天的 HSTS，HTTP 响应不会携带；默认关闭。自签名证书仅供本机测试，不代替公网可信证书。
 
 ## 实现与验证
 
@@ -35,15 +50,15 @@ npm start
 - `public/client.js`、`public/pvp.css`：房间 UI、联机适配、远端角色、预测与位置校正。
 - `server/match.js`：服务器对局规则、弹药、命中、计分和复活。
 - `server/physics.js`、`server/map.json`：服务器移动与碰撞，557 个原版碰撞盒和 38 个候选出生点。
-- `server/index.js`：HTTP、WebSocket、房间隔离、心跳与消息限流。
+- `server/index.js`：可选 HTTPS、WebSocket、房间隔离、心跳、断线恢复与消息限流。
 - `tests/`：规则及真实双 WebSocket 集成测试；`tests/browser-fixture.js` 仅用于受控浏览器验收，不由 `npm start` 启动。
-- `docs/verification.md`：实测范围和截图。
+- `docs/verification.md`：实测范围和截图；`docs/verification-net.md`：本次 HTTPS、断线恢复和延迟补偿验收。
 
 ```sh
 npm test
 ```
 
-服务器根据玩家输入计算移动、重力和碰撞，客户端预测操作，远端插值。服务器计算射线命中与遮挡，客户端不能上报伤害或目标。第一版未实现延迟回溯和竞技级反作弊；高延迟下命中与位置校正仍需实网调优。远端人物是新增的程序化简化模型。
+服务器根据玩家输入计算移动、重力和碰撞，客户端预测操作，远端插值。服务器计算射线命中与遮挡，客户端不能上报伤害或目标。服务端保留约 300ms 位置与蹲姿历史，客户端依据 pong 的服务器时间与 RTT 估算射击时间，命中检测最多回溯 250ms，包含射击者和目标；伤害、射速、弹药与当前复活保护仍由服务器判定。不带 shotTime 的射击保持原有当前时刻检测。跨复活不回放上一条生命；静态墙体不回溯。中等本地误差平滑校正，大于 1.2 米再对齐；远端用速度最多外推 100ms / 0.6 米。尚无竞技级反作弊，高延迟与跨公网体验仍需实网调优。远端人物是新增的程序化简化模型。
 
 原始游戏来源：https://pages.eiaserinnys.me/d/saltline-fable52 。下载原件保留在本项目上级的 `saltline-fable52.html`。字体仍使用原页面的 Google Fonts；字体网络不可用时使用系统字体。
 
@@ -82,7 +97,7 @@ node --env-file=.env server/index.js
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
 
-没有默认管理密码；缺少密码或主密钥时，管理接口拒绝访问，游戏仍可启动。首次初始化后，密码以数据库中的哈希为准；修改环境变量不会重置已有密码。后台修改密码会撤销全部管理会话。管理会话8小时过期，重启后需要重新登录。通过 HTTPS 部署时设置 `ADMIN_COOKIE_SECURE=1`。不要把管理员密码或主密钥放到前端代码或 Git。
+没有默认管理密码；缺少密码或主密钥时，管理接口拒绝访问，游戏仍可启动。首次初始化后，密码以数据库中的哈希为准；修改环境变量不会重置已有密码。后台修改密码会撤销全部管理会话。管理会话8小时过期，重启后需要重新登录。HTTPS 自动启用 Secure；`ADMIN_COOKIE_SECURE=1` 仍可强制启用，本地 HTTP 保持 0，避免浏览器不发送登录 Cookie。不要把管理员密码或主密钥放到前端代码或 Git。
 
 ### 接口与开关
 

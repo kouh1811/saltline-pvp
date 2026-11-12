@@ -1,10 +1,11 @@
 import {clamp,rayBox,raySphere,movePlayer} from './physics.js';
+const HISTORY_MS=300,MAX_REWIND_MS=250;
 const idle=()=>({move:[0,0],yaw:0,pitch:0,jump:false,sprint:false,ads:false,crouch:false});
 export class Match{
  constructor(code,map){this.code=code;this.map=structuredClone(map);this.players=new Map();this.phase='waiting';this.endsAt=0;this.host=null;this.round=0;}
- join(id,name,now){if(this.players.size>=4)throw Error('房间已满（最多 4 人）');if(this.phase==='playing')throw Error('对局进行中，请等下一局');this.host??=id;const p={id,name:String(name||'玩家').replace(/[<>\x00-\x1f]/g,'').slice(0,16),kills:0,deaths:0,input:idle(),lastInput:now,lastShot:-Infinity,reloadAt:0,spawnSerial:0};this.players.set(id,p);this.spawn(p,now);return p;}
+ join(id,name,now){if(this.players.size>=4)throw Error('房间已满（最多 4 人）');if(this.phase==='playing')throw Error('对局进行中，请等下一局');this.host??=id;const p={id,connected:true,rtt:0,name:String(name||'玩家').replace(/[<>\x00-\x1f]/g,'').slice(0,16),kills:0,deaths:0,input:idle(),lastInput:now,lastShot:-Infinity,reloadAt:0,spawnSerial:0};this.players.set(id,p);this.spawn(p,now);return p;}
  leave(id){this.players.delete(id);if(this.host===id)this.host=this.players.keys().next().value??null;}
- spawn(p,now){const others=[...this.players.values()].filter(x=>x!==p&&x.alive);const ranked=this.map.spawns.map(pos=>({pos,score:others.length?Math.min(...others.map(o=>Math.hypot(pos[0]-o.pos[0],pos[2]-o.pos[2]))):Math.random()*10})).sort((a,b)=>b.score-a.score);Object.assign(p,{pos:[...ranked[0].pos],lastSafe:[...ranked[0].pos],vel:[0,0,0],health:100,alive:true,ammo:30,reloadAt:0,respawnAt:0,protectedUntil:now+2000,onGround:true,crouching:false,input:idle(),lastInput:now,lastShot:-Infinity,spawnSerial:p.spawnSerial+1});
+ spawn(p,now){const others=[...this.players.values()].filter(x=>x!==p&&x.alive);const ranked=this.map.spawns.map(pos=>({pos,score:others.length?Math.min(...others.map(o=>Math.hypot(pos[0]-o.pos[0],pos[2]-o.pos[2]))):Math.random()*10})).sort((a,b)=>b.score-a.score);Object.assign(p,{pos:[...ranked[0].pos],lastSafe:[...ranked[0].pos],vel:[0,0,0],health:100,alive:true,ammo:30,reloadAt:0,respawnAt:0,protectedUntil:now+2000,onGround:true,crouching:false,input:idle(),lastInput:now,lastShot:-Infinity,history:[],spawnSerial:p.spawnSerial+1});
   // Face a clear lane instead of starting with the camera against a container.
   let best=-1;
   for(let step=0;step<16;step++){const yaw=step*Math.PI/8,dir=[-Math.sin(yaw),0,-Math.cos(yaw)],origin=[p.pos[0],p.pos[1]+1.68,p.pos[2]];let distance=24;for(const b of this.map.boxes){if(b.playerOnly)continue;const hit=rayBox(origin,dir,b,distance);if(hit!==null)distance=hit;}if(distance>best){best=distance;p.input.yaw=yaw;}}
@@ -15,16 +16,21 @@ export class Match{
   p.input={move:clean.map(v=>v/l),yaw:Number.isFinite(data.yaw)?data.yaw:p.input.yaw,pitch:Number.isFinite(data.pitch)?clamp(data.pitch,-1.5,1.5):0,jump:p.input.jump||data.jump===true,sprint:data.sprint===true,ads:data.ads===true,crouch:data.crouch===true};p.lastInput=now;
  }
  reload(id,now){const p=this.players.get(id);if(this.phase!=='playing'||!p?.alive||p.reloadAt||p.ammo===30)return; p.reloadAt=now+(p.ammo===0?2720:2100);}
- fire(id,dir,now){
+ positionAt(p,time,now){
+  const history=p.history;if(!history.length||time<history[0].t)return p;
+  let before=history[0];for(const after of [...history.slice(1),{t:now,pos:p.pos,crouching:p.crouching}]){if(after.t>=time){const f=after.t===before.t?0:clamp((time-before.t)/(after.t-before.t),0,1);return{pos:before.pos.map((v,i)=>v+(after.pos[i]-v)*f),crouching:f<1?before.crouching:after.crouching};}before=after;}return p;
+ }
+ fire(id,dir,now,shotTime){
   const p=this.players.get(id);if(this.phase!=='playing'||now>=this.endsAt||!p?.alive||p.reloadAt||p.ammo<=0||now-p.lastShot<78||!Array.isArray(dir)||dir.length!==3||!dir.every(Number.isFinite))return null;
   const length=Math.hypot(...dir);if(length<.9||length>1.1)return null;dir=dir.map(v=>v/length);p.lastShot=now;p.ammo--;p.protectedUntil=0;
-  const origin=[p.pos[0],p.pos[1]+(p.crouching?1.02:1.64),p.pos[2]];
+  const time=Number.isFinite(shotTime)?clamp(shotTime,now-MAX_REWIND_MS,now):null,shooter=time===null?p:this.positionAt(p,time,now);
+  const origin=[shooter.pos[0],shooter.pos[1]+(shooter.crouching?1.02:1.64),shooter.pos[2]];
   let distance=180,target=null;
   for(const b of this.map.boxes){if(b.playerOnly)continue;const t=rayBox(origin,dir,b,distance);if(t!==null)distance=t;}
   for(const other of this.players.values()){
    if(other===p||!other.alive||other.protectedUntil>now)continue;
-   const h=other.crouching?1.15:1.8;
-   for(let y=.32;y<=h-.15;y+=.25){const t=raySphere(origin,dir,[other.pos[0],other.pos[1]+y,other.pos[2]],.34);if(t!==null&&t<distance){distance=t;target=other;}}
+   const pose=time===null?other:this.positionAt(other,time,now),h=pose.crouching?1.15:1.8;
+   for(let y=.32;y<=h-.15;y+=.25){const t=raySphere(origin,dir,[pose.pos[0],pose.pos[1]+y,pose.pos[2]],.34);if(t!==null&&t<distance){distance=t;target=other;}}
   }
   let killed=false;
   if(target){target.health=Math.max(0,target.health-26);if(target.health===0){target.alive=false;target.deaths++;target.respawnAt=now+3000;p.kills++;killed=true;}}
@@ -38,7 +44,8 @@ export class Match{
    // Prevent standing into a low ceiling.
    p.crouching=p.input.crouch||p.crouching&&this.map.boxes.some(b=>!b.bulletOnly&&p.pos[0]+.29>b.min[0]&&p.pos[0]-.29<b.max[0]&&p.pos[2]+.29>b.min[2]&&p.pos[2]-.29<b.max[2]&&b.min[1]<p.pos[1]+1.8&&b.max[1]>p.pos[1]+1.1);
    movePlayer(p,Math.min(dt,.05),this.map);
+   p.history.push({t:now,pos:[...p.pos],crouching:p.crouching});while(p.history.length&&p.history[0].t<now-HISTORY_MS)p.history.shift();
   }
  }
- snapshot(now){return {type:'state',code:this.code,host:this.host,phase:this.phase,round:this.round,now,endsAt:this.endsAt,players:[...this.players.values()].map(({id,name,pos,vel,health,alive,kills,deaths,ammo,reloadAt,respawnAt,protectedUntil,spawnSerial,crouching,input,avatarId=null})=>({id,name,pos,vel,health,alive,kills,deaths,ammo,reloadAt,respawnAt,protectedUntil,spawnSerial,crouching,avatarId,yaw:input.yaw,pitch:input.pitch}))};}
+ snapshot(now){return {type:'state',code:this.code,host:this.host,phase:this.phase,round:this.round,now,endsAt:this.endsAt,players:[...this.players.values()].map(({id,name,connected,rtt,pos,vel,health,alive,kills,deaths,ammo,reloadAt,respawnAt,protectedUntil,spawnSerial,crouching,input,avatarId=null})=>({id,name,connected,rtt,pos,vel,health,alive,kills,deaths,ammo,reloadAt,respawnAt,protectedUntil,spawnSerial,crouching,avatarId,yaw:input.yaw,pitch:input.pitch}))};}
 }

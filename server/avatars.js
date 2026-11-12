@@ -13,6 +13,7 @@ export class AvatarService{
  get enabled(){return !!this.generate||!!this.store?.activeProvider()?.apiKey||!this.store&&!!process.env.OPENAI_API_KEY;}
  config(){const f=this.store?.current().features||{customization:true,generation:true,preview:true,equipment:true,inMatch:false};return{...f,enabled:this.enabled&&f.customization&&f.generation,maxPromptLength:300};}
  register(id,ip){const token=randomBytes(24).toString('hex'),s={id,token,ip,equipped:null,job:null};this.sessions.set(id,s);this.tokens.set(token,s);return token;}
+ rebind(id){const s=this.sessions.get(id);this.tokens.delete(s.token);s.token=randomBytes(24).toString('hex');this.tokens.set(s.token,s);return s.token;}
  unregister(id){const s=this.sessions.get(id);if(!s)return;this.tokens.delete(s.token);this.sessions.delete(id);for(const [id,job]of this.jobs)if(job.owner===s.id){job.controller.abort();this.jobs.delete(id);}}
  equipped(id){return this.sessions.get(id)?.equipped??null;}
  applyPolicy(){for(const s of this.sessions.values())if(s.equipped&&(!this.config().customization||this.store?.isAssetDisabled(s.equipped))){s.equipped=null;this.onEquip(s.id,null);}}

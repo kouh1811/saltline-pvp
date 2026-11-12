@@ -7,11 +7,11 @@ window.installPvp=async function(G){
  const ui=document.createElement('div');ui.id='pvp';ui.innerHTML=`
  <section id="lobby" class="pvp-panel" aria-label="自由混战大厅">
   <div class="eyebrow">BERTH 04 / MULTIPLAYER</div><h1>SALTLINE<span>自由混战</span></h1>
-  <p class="intro">雨中的港口。最多四人。五分钟。</p>
+  <p class="intro">雨中的港口。最多八人。五分钟。</p>
   <div id="connect-form"><label for="nickname">呼号</label><input id="nickname" maxlength="16" placeholder="输入你的名字" value="">
   <div class="room-actions"><button id="create-room" class="primary">创建房间 ↗</button><span>或</span><label class="sr-only" for="room-code">房间码</label><input id="room-code" maxlength="6" placeholder="6 位房间码" autocomplete="off"><button id="join-room">加入</button></div></div>
   <div id="room-info" hidden><div class="room-label">房间码 · 发给你的朋友</div><div class="room-code"><strong id="code"></strong><button id="copy-room">复制邀请链接</button></div><div id="roster"></div><button id="start-game" class="primary">开始对局</button><p id="wait-hint"></p></div>
-  <p id="status" role="status">正在连接港口服务器…</p><div class="rules">2—4 人 · 5 分钟 · 击杀计分 · 3 秒复活</div>
+  <p id="status" role="status">正在连接港口服务器…</p><div class="rules">2—8 人 · 5 分钟 · 击杀计分 · 3 秒复活</div>
   <button id="open-avatar-lobby">自定义角色 ↗</button><details><summary>操作与画质</summary><p>WASD 移动 · 鼠标瞄准 · 左键射击 · 右键开镜<br>R 换弹 · 空格跳跃 · Shift 冲刺 · C 蹲下<br>Esc 释放鼠标，比赛继续；Tab 查看战绩。</p><label for="quality">画质</label><select id="quality"><option value="low">流畅</option><option value="medium">均衡</option><option value="high">高画质</option></select></details>
  </section>
  <div id="match-strip" hidden><span>FFA <b id="live-code"></b></span><strong id="clock">05:00</strong><span id="population"></span><button id="show-scores">战绩 [Tab]</button><button id="edit-avatar-match">角色外观</button><button id="leave-game">退出</button></div>
@@ -34,7 +34,9 @@ window.installPvp=async function(G){
  function setControls(enabled){enabled=enabled&&connected&&!avatarEditor?.isOpen();G.player.enabled=enabled;G.input.setGameplay?.(enabled);G.weapon.debug.noFire=!enabled;}
  function unlock(){G.input.exitLock?.();}
  function capture(){if(avatarEditor?.isOpen()||!connected||state?.phase!=='playing'||!own?.alive)return;G.audio.resume?.();G.input.requestLock?.();setControls(true);$('#resume-game').hidden=true;}
+ function preparationHint(){if(state?.phase==='preparing')$('#wait-hint').textContent=`角色准备中 · 最多还等 ${Math.max(0,Math.ceil((state.preparingEndsAt-Date.now()-offset)/1000))} 秒。请确认提示词生成角色，或选择使用默认外观；全部准备好后立即开局。`;}
  const game={state:'lobby',start(){},update(dt){
+  preparationHint();
   const reserve=document.querySelector('.h-ammo-r');if(reserve)reserve.textContent='∞';
   if(connected&&state?.phase==='playing'){
    const now=Date.now()+offset;const remaining=Math.max(0,Math.ceil((state.endsAt-now)/1000));$('#clock').textContent=`${String(Math.floor(remaining/60)).padStart(2,'0')}:${String(remaining%60).padStart(2,'0')}`;
@@ -88,10 +90,11 @@ window.installPvp=async function(G){
  }
  function updateScoreboard(){const tbody=$('#score-rows');tbody.replaceChildren();for(const p of [...state.players].sort((a,b)=>b.kills-a.kills||a.deaths-b.deaths||a.name.localeCompare(b.name))){const row=document.createElement('tr');if(p.id===id)row.className='self';for(const value of [p.name+(p.id===id?' · 你':''),p.kills,p.deaths]){const cell=document.createElement('td');cell.textContent=String(value);row.append(cell);}tbody.append(row);}}
  function onState(next){
-  const prev=state;state=next;avatarEditor?.setPhase(next.phase);clockSample(next.now+ping/2-Date.now(),.02);own=next.players.find(p=>p.id===id);if(!own)return;
-  $('#live-code').textContent=next.code;$('#population').textContent=`${next.players.filter(p=>p.connected).length}/4 在线`;$('#code').textContent=next.code;
-  $('#roster').replaceChildren();for(const p of next.players){const row=document.createElement('div');row.className='roster-player';row.textContent=`${p.name}${p.id===id?' · 你':''}${p.id===next.host?' · 房主':''}${p.connected?'':' · 掉线中'}`;$('#roster').append(row);}
-  $('#start-game').hidden=id!==next.host;$('#start-game').disabled=next.players.length<2;$('#wait-hint').textContent=next.players.length<2?'等待朋友加入，至少 2 人才能开始。':id===next.host?'所有玩家已就位，由你开始。':'等待房主开始对局。';
+  const prev=state;state=next;avatarEditor?.setPhase(next.phase);clockSample(next.now+ping/2-Date.now(),.02);own=next.players.find(p=>p.id===id);if(!own)return;avatarEditor?.setPlayerState?.(own,next.round);
+  $('#live-code').textContent=next.code;$('#population').textContent=`${next.players.filter(p=>p.connected).length}/8 在线`;$('#code').textContent=next.code;
+  $('#roster').replaceChildren();for(const p of next.players){const row=document.createElement('div');row.className='roster-player';row.textContent=`${p.name}${p.id===id?' · 你':''}${p.id===next.host?' · 房主':''}${p.connected?'':' · 掉线中'}${next.phase==='preparing'?' · '+({pending:'待选择',default:'默认外观',generating:'生成中',ready:'已完成',failed:'失败，可重试或选默认'}[p.avatarPreparation]||'待选择'):''}`;$('#roster').append(row);}
+  $('#start-game').hidden=id!==next.host;$('#start-game').disabled=next.players.length<2||next.phase==='preparing';$('#wait-hint').textContent=next.players.length<2?'等待朋友加入，至少 2 人才能开始。':id===next.host?'所有玩家已就位，由你开始。':'等待房主开始对局。';
+  preparationHint();
   for(const p of next.players){if(p.id===id)continue;let remote=remotes.get(p.id);if(!remote){remote=makeRemote(p);remotes.set(p.id,remote);}if(remote.wantedAvatar!==(p.avatarId||null))void updateAppearance(remote,p.avatarId||null);if(remote.spawnSerial!==p.spawnSerial){remote.root.position.fromArray(p.pos);remote.spawnSerial=p.spawnSerial;}remote.target.fromArray(p.pos);remote.velocity.fromArray(p.vel);remote.connected=p.connected;remote.receivedAt=performance.now();remote.yaw=p.yaw;remote.crouching=p.crouching;remote.protectedUntil=p.protectedUntil;remote.root.visible=p.alive&&next.phase==='playing';}
   for(const [pid,remote] of remotes)if(!next.players.some(p=>p.id===pid)){disposeRemote(remote);remotes.delete(pid);}
   if(next.phase==='playing'){
@@ -108,7 +111,7 @@ window.installPvp=async function(G){
   }else if(next.phase==='finished'){
    game.state='finished';$('#lobby').hidden=true;$('#match-strip').hidden=false;$('#clock').textContent='00:00';setControls(false);G.weapon.setVisible(false);unlock();$('#death-notice').hidden=true;$('#resume-game').hidden=true;$('#scoreboard').hidden=false;$('#score-title').textContent='本局结束';$('#rematch').hidden=id!==next.host;$('#return-lobby').hidden=false;$('#rematch').disabled=next.players.length<2;
    const max=Math.max(...next.players.map(p=>p.kills));const winners=next.players.filter(p=>p.kills===max).map(p=>p.name);$('#winner').textContent=`${winners.join('、')}${winners.length>1?' 并列第一':' 获胜'} · ${max} 击杀`;
-  }else{game.state='lobby';setControls(false);$('#lobby').hidden=false;$('#room-info').hidden=false;}
+  }else{game.state=next.phase==='preparing'?'preparing':'lobby';setControls(false);G.weapon.setVisible(false);G.hud.show(false);unlock();$('#match-strip').hidden=true;$('#live-score').hidden=true;$('#scoreboard').hidden=true;$('#resume-game').hidden=true;$('#lobby').hidden=false;$('#room-info').hidden=false;}
   updateScoreboard();
  }
  function feed(message){const line=document.createElement('div');line.textContent=message;$('#kill-feed').prepend(line);setTimeout(()=>line.remove(),5500);while($('#kill-feed').children.length>4)$('#kill-feed').lastChild.remove();}

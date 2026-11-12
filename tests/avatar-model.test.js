@@ -37,9 +37,22 @@ test('chat adapter minimizes thinking and accepts nonempty length finishes',asyn
  assert.equal(requests[0].thinking,undefined);assert.equal(requests[0].reasoning_effort,undefined);
 
  ({recipe:out,requests}=await run('other-model',body=>body.thinking||body.reasoning_effort?{ok:false,status:400,json:async()=>({})}:chatOk(payload)));
- assert.deepEqual(out,recipe);assert.equal(requests.length,2);assert.deepEqual(requests[0].thinking,{type:'disabled'});assert.equal(requests[0].reasoning_effort,'low');assert.equal(requests[1].thinking,undefined);assert.equal(requests[1].reasoning_effort,undefined);
+ assert.deepEqual(out,recipe);assert.equal(requests.length,3);assert.deepEqual(requests[0].thinking,{type:'disabled'});assert.equal(requests[0].reasoning_effort,'low');assert.deepEqual(requests[1].thinking,{type:'disabled'});assert.equal(requests[1].reasoning_effort,undefined);assert.equal(requests[2].thinking,undefined);assert.equal(requests[2].reasoning_effort,undefined);
 
  const lengthOk=createModelGenerator({apiKey:'test',protocol:'chat',model:'kimi-k2.6',fetchImpl:async()=>({ok:true,json:async()=>({choices:[{finish_reason:'length',message:{content:payload}}]})})});
  assert.deepEqual(await lengthOk('测试'),recipe);
  await assert.rejects(createModelGenerator({apiKey:'test',protocol:'chat',model:'kimi-k2.6',fetchImpl:async()=>({ok:true,json:async()=>({choices:[{finish_reason:'length',message:{content:'',reasoning_content:'thinking'}}]})})})('测试'),/未完成/);
+});
+
+test('deepseek chat disables thinking and accepts fenced JSON',async()=>{
+ const payload=JSON.stringify(recipe);
+ const requests=[];
+ const gen=createModelGenerator({apiKey:'test',baseURL:'https://example.test/v1',protocol:'chat',model:'deepseek-v4-1-flash-economy-261017',fetchImpl:async(url,o)=>{requests.push(JSON.parse(o.body));return{ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:'```json\n'+payload+'\n```'}}]})};}});
+ assert.deepEqual(await gen('测试'),recipe);
+ assert.equal(requests.length,1);assert.deepEqual(requests[0].thinking,{type:'disabled'});assert.equal(requests[0].reasoning_effort,undefined);
+
+ const retry=[];
+ const other=createModelGenerator({apiKey:'test',baseURL:'https://example.test/v1',protocol:'chat',model:'other-model',fetchImpl:async(url,o)=>{const body=JSON.parse(o.body);retry.push(body);if(body.reasoning_effort)return{ok:false,status:400,json:async()=>({})};return{ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:payload}}]})};}});
+ assert.deepEqual(await other('测试'),recipe);
+ assert.equal(retry.length,2);assert.equal(retry[0].reasoning_effort,'low');assert.deepEqual(retry[0].thinking,{type:'disabled'});assert.equal(retry[1].reasoning_effort,undefined);assert.deepEqual(retry[1].thinking,{type:'disabled'});
 });

@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "蓝色小机器人",
+  "description": "圆润的蓝色机身和金色眼睛",
+  "nodes": [
+    {"id":"body","parent":null,"shape":"ellipsoid","pos":[0,0.9,0],"size":[0.6,0.9,0.5],"color":"#4488cc"},
+    {"id":"eye","parent":"body","shape":"ellipsoid","pos":[0,0.3,-0.4],"size":[0.18,0.18,0.12],"color":"#ffcc44"}
+  ],
+  "details": []
+}

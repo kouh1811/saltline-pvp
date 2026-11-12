@@ -49,7 +49,7 @@ export function createModelGenerator({apiKey=process.env.OPENAI_API_KEY,baseURL=
    }
    else{if(data.status!=='completed')throw Error('生成未完成，请重试');text=(data.output||[]).flatMap(i=>i.content||[]).filter(c=>c.type==='output_text').map(c=>c.text).join('');}
    if(typeof text!=='string')throw Error('生成结果格式无效，请重试');
-   try{const recipe=JSON.parse(extractJson(text));validate(recipe);if(Buffer.byteLength(text)>180000)throw Error('输出超限');return recipe;}catch(error){if(attempt===1)throw Error('生成结果未通过结构检查，请换一种描述重试');input=prompt+'\n上轮输出未通过通用结构检查：'+error.message+'。请重新生成，严格遵守 schema 和预算，所有 tube radii 至少0.002，parent 只引用先前节点，不添加额外字段。';}
+   try{const recipe=JSON.parse(extractJson(text));validate(recipe);if(Buffer.byteLength(text)>400000)throw Error('输出超限');return recipe;}catch(error){if(attempt===1)throw Error('生成结果未通过结构检查，请换一种描述重试');input=prompt+'\n上轮输出未通过通用结构检查：'+error.message+'。请重新生成，严格遵守 schema 和预算，所有 tube radii 至少0.002，parent 只引用先前节点，不添加额外字段。';}
   }
  };
 }

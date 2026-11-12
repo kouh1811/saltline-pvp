@@ -1,6 +1,7 @@
+import {surfaceMaterial} from './surfaces.mjs';
 import {validate,instances} from './schema.mjs';
 export function createAvatar(T,recipe){
- const budget=validate(recipe),start=performance.now(),root=new T.Group(),nodes=new Map(),cache=new Map();let triangles=0;
+ const budget=validate(recipe),start=performance.now(),root=new T.Group(),nodes=new Map(),cache=new Map(),eyeGeometries=new Map();let triangles=0;
  const material=(color,metal=0,rough=.8)=>{const key=[color,metal,rough].join();if(!cache.has(key))cache.set(key,new T.MeshStandardMaterial({color,metalness:metal,roughness:rough}));return cache.get(key);};
  const vector=a=>new T.Vector3(...a);
  function tube(n){
@@ -10,12 +11,20 @@ export function createAvatar(T,recipe){
   for(const end of [0,steps]){const center=positions.length/3;positions.push(...curve.getPointAt(end/steps).toArray());for(let j=0;j<sides;j++){const a=end*(sides+1)+j;indices.push(center,end===0?a+1:a,end===0?a:a+1);}}
   const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setIndex(indices);g.computeVertexNormals();g.scale(...n.size);return g;
  }
- function geometry(n){const [x,y,z]=n.size;let g;if(n.shape==='tube')return tube(n);if(n.shape==='ellipsoid')g=new T.SphereGeometry(.5,28,20);if(n.shape==='cone')g=new T.ConeGeometry(.5,1,20);if(n.shape==='torus')g=new T.TorusGeometry(.4,.1,10,32);if(n.shape==='box'){
+ function geometry(n){const [x,y,z]=n.size;let g;
+ if(n.shape==='capsule'){g=new T.CapsuleGeometry(.5,1,8,24);g.scale(x,y/2,z);return g;}
+ if(n.shape==='lathe'){g=new T.LatheGeometry(n.points.map(p=>new T.Vector2(...p)),32);g.scale(x,y,z);return g;}
+ if(n.shape==='superellipsoid'){g=new T.SphereGeometry(1,40,28);const p=g.attributes.position,e=n.roundness??1,pow=v=>Math.sign(v)*Math.pow(Math.abs(v),e);for(let i=0;i<p.count;i++)p.setXYZ(i,pow(p.getX(i))*x/2,pow(p.getY(i))*y/2,pow(p.getZ(i))*z/2);g.computeVertexNormals();return g;}
+ if(n.shape==='eye'){g=new T.SphereGeometry(.5,32,24);g.scale(x,y,z);return g;}
+ if(n.shape==='tube')return tube(n);if(n.shape==='ellipsoid')g=new T.SphereGeometry(.5,recipe.version===3?40:28,recipe.version===3?28:20);if(n.shape==='cone')g=new T.ConeGeometry(.5,1,20);if(n.shape==='torus')g=new T.TorusGeometry(.4,.1,10,32);if(n.shape==='box'){
   const r=Math.min(.03,x*.1,y*.1,z*.1),s=new T.Shape(),a=x/2-r,b=y/2-r;s.moveTo(-a,-b);s.lineTo(a,-b);s.lineTo(a,b);s.lineTo(-a,b);s.closePath();g=new T.ExtrudeGeometry(s,{depth:z-2*r,bevelEnabled:true,bevelSegments:3,steps:1,bevelSize:r,bevelThickness:r});g.translate(0,0,-z/2+r);return g;
  }g.scale(x,y,z);return g;}
  try{
- for(const n of recipe.nodes){const parents=n.parent?nodes.get(n.parent):[{pivot:root}],copies=[],g=geometry(n),mat=material(n.color,n.metal,n.rough);triangles+=(g.index?g.index.count:g.attributes.position.count)/3;
-  for(const parent of parents)for(const instance of instances(n)){const rotation=new T.Group();if(instance.mirror)rotation.scale.x=-1;rotation.rotation[instance.axis]=instance.angle;parent.pivot.add(rotation);const pivot=new T.Group();pivot.position.fromArray(n.pos);pivot.rotation.set(...(n.rot||[0,0,0]));rotation.add(pivot);const mesh=new T.Mesh(g,mat);mesh.castShadow=mesh.receiveShadow=true;pivot.add(mesh);copies.push({pivot,geometry:g});}nodes.set(n.id,copies);
+ for(const n of recipe.nodes){const parents=n.parent?nodes.get(n.parent):[{pivot:root}],copies=[],g=geometry(n),mat=recipe.version===3?surfaceMaterial(T,n):material(n.color,n.metal,n.rough);if(recipe.version===3)cache.set(n.id,mat);triangles+=(g.index?g.index.count:g.attributes.position.count)/3;
+  for(const parent of parents)for(const instance of instances(n)){const rotation=new T.Group();if(instance.mirror)rotation.scale.x=-1;rotation.rotation[instance.axis]=instance.angle;parent.pivot.add(rotation);const pivot=new T.Group();pivot.position.fromArray(n.pos);pivot.rotation.set(...(n.rot||[0,0,0]));rotation.add(pivot);const mesh=new T.Mesh(g,mat);mesh.castShadow=mesh.receiveShadow=true;pivot.add(mesh);if(n.shape==='eye'){
+ const eye=new T.Group();pivot.remove(mesh);eye.add(mesh);pivot.add(eye);eye.quaternion.setFromUnitVectors(new T.Vector3(0,0,-1),vector(n.direction||[0,0,-1]).normalize());
+ for(const [col,scale,pos] of [[n.iris||'#44bbcc',[.55,.55,.20],[0,0,-.44]],[n.pupil||'#101825',[.27,.32,.13],[0,0,-.53]],['#ffffff',[.12,.12,.08],[-.12,.13,-.59]]]){const eyeKey=n.id+pos.join();let eg=eyeGeometries.get(eyeKey);if(!eg){eg=new T.SphereGeometry(.5,24,16);eg.scale(...scale.map((v,i)=>v*n.size[i]));eg.translate(...pos.map((v,i)=>v*n.size[i]));eyeGeometries.set(eyeKey,eg);}const part=new T.Mesh(eg,material(col,0,.25));eye.add(part);triangles+=eg.index.count/3;}}
+ copies.push({pivot,geometry:g});}nodes.set(n.id,copies);
  }
  let seed=1777;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
  for(const d of recipe.details)for(const entry of nodes.get(d.on)){
@@ -28,7 +37,11 @@ export function createAvatar(T,recipe){
    normal.copy(f.normal);if(d.type==='fur'){const flow=vector(d.direction||[0,-1,0]);if(flow.lengthSq()<.0001)flow.set(0,-1,0);flow.normalize();const tangent=flow.clone().addScaledVector(normal,-flow.dot(normal));if(tangent.lengthSq()>.005)normal.multiplyScalar(.28).addScaledVector(tangent.normalize(),.96).normalize();}else if(d.direction)normal.addScaledVector(vector(d.direction),.7).normalize();const length=d.length*(.65+random()*.7),width=d.width*(.8+random()*.4);point.addScaledVector(normal,length*.32);quat.setFromUnitVectors(d.type==='suckers'?new T.Vector3(0,0,1):up,normal);scale.set(width,length,d.type==='fur'?width:d.type==='feathers'?width*.18:width);if(d.type==='suckers')scale.set(width,width,length*.3);matrix.compose(point,quat,scale);inst.setMatrixAt(i,matrix);{const shade=.88+random()*.22;inst.setColorAt(i,new T.Color(shade,shade,shade));}}
   inst.instanceMatrix.needsUpdate=true;inst.computeBoundingSphere?.();entry.pivot.add(inst);
  }
- root.updateMatrixWorld(true);const bounds=new T.Box3().setFromObject(root),height=bounds.max.y-bounds.min.y;if(!Number.isFinite(height)||height<.1||height>12)throw Error('Character height invalid');const result=new T.Group();root.position.y=-bounds.min.y;result.add(root);result.scale.setScalar(1.8/height);result.userData={name:recipe.name,parts:budget.instances,surface:budget.surface,triangles,buildMs:performance.now()-start,height:1.8,sourceHeight:height};return result;
+ // Batch repeated v3 parts, retaining logical pivots for child transforms.
+ // Separate reflected roots: InstancedMesh does not support negative instance scales.
+ root.updateMatrixWorld(true);
+ if(recipe.version===3){const groups=new Map();root.traverse(o=>{if(!o.isMesh||o.isInstancedMesh)return;const key=o.geometry.uuid+o.material.uuid+o.castShadow+o.receiveShadow+(o.matrixWorld.determinant()<0);const list=groups.get(key)||[];list.push(o);groups.set(key,list);});for(const list of groups.values()){if(list.length<2)continue;const first=list[0],batch=new T.InstancedMesh(first.geometry,first.material,list.length);batch.castShadow=first.castShadow;batch.receiveShadow=first.receiveShadow;const reflected=first.matrixWorld.determinant()<0,reflection=new T.Matrix4().makeScale(-1,1,1);if(reflected)batch.scale.x=-1;list.forEach((o,i)=>{batch.setMatrixAt(i,reflected?o.matrixWorld.clone().premultiply(reflection):o.matrixWorld);o.removeFromParent();});batch.instanceMatrix.needsUpdate=true;batch.computeBoundingSphere();root.add(batch);}}
+ const bounds=new T.Box3().setFromObject(root),height=bounds.max.y-bounds.min.y;if(!Number.isFinite(height)||height<.1||height>12)throw Error('Character height invalid');const result=new T.Group();root.position.y=-bounds.min.y;result.add(root);result.scale.setScalar(1.8/height);result.userData={name:recipe.name,parts:budget.instances,surface:budget.surface,triangles,buildMs:performance.now()-start,height:1.8,sourceHeight:height};return result;
  }catch(error){root.traverse(n=>n.geometry?.dispose());cache.forEach(m=>m.dispose());throw error;}
 }
 

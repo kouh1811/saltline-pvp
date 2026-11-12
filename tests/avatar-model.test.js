@@ -15,7 +15,7 @@ test('model API errors hide provider details and incomplete results are rejected
 test('graph validator bounds repeated child and surface expansion and rejects executable fields',()=>{
  assert.deepEqual(validate(recipe),{instances:1,surface:0});
  assert.throws(()=>validate({...recipe,nodes:[{...recipe.nodes[0],code:'alert(1)'}]}),/unknown field/);
- const nodes=[{...recipe.nodes[0],repeat:{count:12,axis:'y',angle:6.28}},{...recipe.nodes[0],id:'child',parent:'body',repeat:{count:12,axis:'y',angle:6.28},mirror:true}];assert.throws(()=>validate({...recipe,nodes}),/instances budget/);
+ const nodes=[{...recipe.nodes[0],repeat:{count:12,axis:'y',angle:6.28},mirror:true},{...recipe.nodes[0],id:'child',parent:'body',repeat:{count:12,axis:'y',angle:6.28},mirror:true}];assert.throws(()=>validate({...recipe,nodes}),/instances budget/);
  assert.throws(()=>validate({...recipe,nodes:[{...recipe.nodes[0],repeat:{count:12,axis:'y',angle:6.28}}],details:[{on:'body',type:'fur',count:5000,length:.01,width:.01,color:'#ffffff'}]}),/surface budget/);
 });
 test('chat-completions compatibility validates the same declarative graph',async()=>{

@@ -3,6 +3,9 @@
 window.installPvp=async function(G){
  const T=G.THREE,$=s=>document.querySelector(s);
  const [{createAvatar,disposeAvatar},{mountAvatarEditor}]=await Promise.all([import('/avatar/renderer.mjs'),import('/avatar/editor.mjs')]);
+ const {configureAvatarQuality}=await import('/avatar/quality.mjs');
+ const releaseAvatarLighting=configureAvatarQuality(T,G.renderer,G.scene);
+ addEventListener('pagehide',releaseAvatarLighting,{once:true});
  const avatarCSS=document.createElement('link');avatarCSS.rel='stylesheet';avatarCSS.href='/avatar/avatar.css';document.head.append(avatarCSS);
  const ui=document.createElement('div');ui.id='pvp';ui.innerHTML=`
  <section id="lobby" class="pvp-panel" aria-label="自由混战大厅">

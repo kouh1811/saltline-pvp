@@ -1,10 +1,679 @@
 {
-  "version": 2,
-  "name": "蓝色小机器人",
-  "description": "圆润的蓝色机身和金色眼睛",
+  "version": 3,
+  "name": "潮汐探险家",
+  "description": "青绿渐变的圆润潜水探险家，琥珀虹膜与高光眼睛、金色耳罩、条纹腹甲和微光信标。",
   "nodes": [
-    {"id":"body","parent":null,"shape":"ellipsoid","pos":[0,0.9,0],"size":[0.6,0.9,0.5],"color":"#4488cc"},
-    {"id":"eye","parent":"body","shape":"ellipsoid","pos":[0,0.3,-0.4],"size":[0.18,0.18,0.12],"color":"#ffcc44"}
+    {
+      "id": "body",
+      "parent": null,
+      "shape": "lathe",
+      "pos": [
+        0,
+        0.9,
+        0
+      ],
+      "size": [
+        1,
+        1,
+        1
+      ],
+      "color": "#308d99",
+      "points": [
+        [
+          0,
+          -0.48
+        ],
+        [
+          0.25,
+          -0.44
+        ],
+        [
+          0.37,
+          -0.22
+        ],
+        [
+          0.39,
+          0.12
+        ],
+        [
+          0.3,
+          0.4
+        ],
+        [
+          0,
+          0.48
+        ]
+      ],
+      "gradient": {
+        "axis": "y",
+        "colors": [
+          "#173d62",
+          "#39aab0",
+          "#a8efe3"
+        ]
+      },
+      "clearcoat": 0.65
+    },
+    {
+      "id": "belly",
+      "parent": null,
+      "shape": "superellipsoid",
+      "pos": [
+        0,
+        0.92,
+        -0.3
+      ],
+      "size": [
+        0.46,
+        0.57,
+        0.17
+      ],
+      "color": "#f9db9d",
+      "roundness": 0.55,
+      "pattern": {
+        "type": "stripes",
+        "colors": [
+          "#ffffff",
+          "#ecd6af"
+        ],
+        "scale": 14
+      },
+      "sheen": 0.5
+    },
+    {
+      "id": "head",
+      "parent": null,
+      "shape": "superellipsoid",
+      "pos": [
+        0,
+        1.66,
+        -0.025
+      ],
+      "size": [
+        0.78,
+        0.62,
+        0.62
+      ],
+      "color": "#59bfc1",
+      "roundness": 0.65,
+      "gradient": {
+        "axis": "y",
+        "colors": [
+          "#278795",
+          "#9ce8dc"
+        ]
+      },
+      "clearcoat": 0.5
+    },
+    {
+      "id": "helmet",
+      "parent": null,
+      "shape": "lathe",
+      "pos": [
+        0,
+        1.89,
+        0.025
+      ],
+      "size": [
+        1,
+        1,
+        1
+      ],
+      "color": "#1a425d",
+      "points": [
+        [
+          0.39,
+          -0.1
+        ],
+        [
+          0.42,
+          0
+        ],
+        [
+          0.31,
+          0.17
+        ],
+        [
+          0.15,
+          0.25
+        ],
+        [
+          0,
+          0.28
+        ]
+      ],
+      "metal": 0.6,
+      "rough": 0.3,
+      "clearcoat": 0.8
+    },
+    {
+      "id": "eyes",
+      "parent": null,
+      "shape": "eye",
+      "pos": [
+        0.175,
+        1.68,
+        -0.32
+      ],
+      "size": [
+        0.24,
+        0.26,
+        0.16
+      ],
+      "color": "#fff9e8",
+      "mirror": true,
+      "iris": "#dd9639",
+      "pupil": "#132b42",
+      "direction": [
+        0,
+        -0.05,
+        -1
+      ]
+    },
+    {
+      "id": "mouth",
+      "parent": null,
+      "shape": "capsule",
+      "pos": [
+        0,
+        1.46,
+        -0.327
+      ],
+      "size": [
+        0.14,
+        0.025,
+        0.025
+      ],
+      "color": "#173c50"
+    },
+    {
+      "id": "larm",
+      "parent": null,
+      "shape": "capsule",
+      "pos": [
+        -0.43,
+        0.99,
+        0.015
+      ],
+      "size": [
+        0.22,
+        0.65,
+        0.25
+      ],
+      "color": "#3b9da8",
+      "rot": [
+        0,
+        0,
+        -0.18
+      ],
+      "gradient": {
+        "axis": "y",
+        "colors": [
+          "#1f526f",
+          "#77d8cc"
+        ]
+      }
+    },
+    {
+      "id": "lglove",
+      "parent": null,
+      "shape": "superellipsoid",
+      "pos": [
+        -0.49,
+        0.67,
+        -0.04
+      ],
+      "size": [
+        0.27,
+        0.29,
+        0.3
+      ],
+      "color": "#e6b968",
+      "roundness": 0.6,
+      "clearcoat": 0.4
+    },
+    {
+      "id": "lleg",
+      "parent": null,
+      "shape": "capsule",
+      "pos": [
+        -0.19,
+        0.36,
+        0.015
+      ],
+      "size": [
+        0.25,
+        0.5,
+        0.28
+      ],
+      "color": "#26748c"
+    },
+    {
+      "id": "lboot",
+      "parent": null,
+      "shape": "superellipsoid",
+      "pos": [
+        -0.19,
+        0.13,
+        -0.1
+      ],
+      "size": [
+        0.32,
+        0.24,
+        0.49
+      ],
+      "color": "#203f59",
+      "roundness": 0.45,
+      "clearcoat": 0.6
+    },
+    {
+      "id": "lsole",
+      "parent": null,
+      "shape": "superellipsoid",
+      "pos": [
+        -0.19,
+        0.035,
+        -0.1
+      ],
+      "size": [
+        0.34,
+        0.07,
+        0.51
+      ],
+      "color": "#d7af6f",
+      "roundness": 0.4
+    },
+    {
+      "id": "lear",
+      "parent": null,
+      "shape": "capsule",
+      "pos": [
+        -0.4,
+        1.77,
+        0.03
+      ],
+      "size": [
+        0.13,
+        0.3,
+        0.19
+      ],
+      "color": "#dfa756",
+      "metal": 0.5,
+      "rough": 0.3
+    },
+    {
+      "id": "lcheek",
+      "parent": null,
+      "shape": "ellipsoid",
+      "pos": [
+        -0.28,
+        1.51,
+        -0.28
+      ],
+      "size": [
+        0.13,
+        0.065,
+        0.07
+      ],
+      "color": "#efac83"
+    },
+    {
+      "id": "lbrow",
+      "parent": null,
+      "shape": "capsule",
+      "pos": [
+        -0.17,
+        1.83,
+        -0.32
+      ],
+      "size": [
+        0.2,
+        0.035,
+        0.035
+      ],
+      "color": "#21495b",
+      "rot": [
+        0,
+        0,
+        -0.14
+      ]
+    },
+    {
+      "id": "rarm",
+      "parent": null,
+      "shape": "capsule",
+      "pos": [
+        0.43,
+        0.99,
+        0.015
+      ],
+      "size": [
+        0.22,
+        0.65,
+        0.25
+      ],
+      "color": "#3b9da8",
+      "rot": [
+        0,
+        0,
+        0.18
+      ],
+      "gradient": {
+        "axis": "y",
+        "colors": [
+          "#1f526f",
+          "#77d8cc"
+        ]
+      }
+    },
+    {
+      "id": "rglove",
+      "parent": null,
+      "shape": "superellipsoid",
+      "pos": [
+        0.49,
+        0.67,
+        -0.04
+      ],
+      "size": [
+        0.27,
+        0.29,
+        0.3
+      ],
+      "color": "#e6b968",
+      "roundness": 0.6,
+      "clearcoat": 0.4
+    },
+    {
+      "id": "rleg",
+      "parent": null,
+      "shape": "capsule",
+      "pos": [
+        0.19,
+        0.36,
+        0.015
+      ],
+      "size": [
+        0.25,
+        0.5,
+        0.28
+      ],
+      "color": "#26748c"
+    },
+    {
+      "id": "rboot",
+      "parent": null,
+      "shape": "superellipsoid",
+      "pos": [
+        0.19,
+        0.13,
+        -0.1
+      ],
+      "size": [
+        0.32,
+        0.24,
+        0.49
+      ],
+      "color": "#203f59",
+      "roundness": 0.45,
+      "clearcoat": 0.6
+    },
+    {
+      "id": "rsole",
+      "parent": null,
+      "shape": "superellipsoid",
+      "pos": [
+        0.19,
+        0.035,
+        -0.1
+      ],
+      "size": [
+        0.34,
+        0.07,
+        0.51
+      ],
+      "color": "#d7af6f",
+      "roundness": 0.4
+    },
+    {
+      "id": "rear",
+      "parent": null,
+      "shape": "capsule",
+      "pos": [
+        0.4,
+        1.77,
+        0.03
+      ],
+      "size": [
+        0.13,
+        0.3,
+        0.19
+      ],
+      "color": "#dfa756",
+      "metal": 0.5,
+      "rough": 0.3
+    },
+    {
+      "id": "rcheek",
+      "parent": null,
+      "shape": "ellipsoid",
+      "pos": [
+        0.28,
+        1.51,
+        -0.28
+      ],
+      "size": [
+        0.13,
+        0.065,
+        0.07
+      ],
+      "color": "#efac83"
+    },
+    {
+      "id": "rbrow",
+      "parent": null,
+      "shape": "capsule",
+      "pos": [
+        0.17,
+        1.83,
+        -0.32
+      ],
+      "size": [
+        0.2,
+        0.035,
+        0.035
+      ],
+      "color": "#21495b",
+      "rot": [
+        0,
+        0,
+        0.14
+      ]
+    },
+    {
+      "id": "pack",
+      "parent": null,
+      "shape": "superellipsoid",
+      "pos": [
+        0,
+        1.02,
+        0.32
+      ],
+      "size": [
+        0.48,
+        0.64,
+        0.24
+      ],
+      "color": "#d3a354",
+      "roundness": 0.5,
+      "metal": 0.4
+    },
+    {
+      "id": "antenna",
+      "parent": null,
+      "shape": "capsule",
+      "pos": [
+        0,
+        2.22,
+        0.03
+      ],
+      "size": [
+        0.035,
+        0.17,
+        0.035
+      ],
+      "color": "#d9bd82",
+      "metal": 0.7
+    },
+    {
+      "id": "beacon",
+      "parent": null,
+      "shape": "ellipsoid",
+      "pos": [
+        0,
+        2.32,
+        0.03
+      ],
+      "size": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "color": "#a5ffed",
+      "emissive": {
+        "color": "#36dfc6",
+        "intensity": 1.2
+      }
+    },
+    {
+      "id": "badge0",
+      "parent": null,
+      "shape": "ellipsoid",
+      "pos": [
+        -0.132,
+        1.04,
+        -0.395
+      ],
+      "size": [
+        0.025,
+        0.025,
+        0.018
+      ],
+      "color": "#fff4d8",
+      "metal": 0.5
+    },
+    {
+      "id": "badge1",
+      "parent": null,
+      "shape": "ellipsoid",
+      "pos": [
+        -0.088,
+        1.04,
+        -0.395
+      ],
+      "size": [
+        0.025,
+        0.025,
+        0.018
+      ],
+      "color": "#e9b96a",
+      "metal": 0.5
+    },
+    {
+      "id": "badge2",
+      "parent": null,
+      "shape": "ellipsoid",
+      "pos": [
+        -0.044,
+        1.04,
+        -0.395
+      ],
+      "size": [
+        0.025,
+        0.025,
+        0.018
+      ],
+      "color": "#fff4d8",
+      "metal": 0.5
+    },
+    {
+      "id": "badge3",
+      "parent": null,
+      "shape": "ellipsoid",
+      "pos": [
+        0,
+        1.04,
+        -0.395
+      ],
+      "size": [
+        0.025,
+        0.025,
+        0.018
+      ],
+      "color": "#e9b96a",
+      "metal": 0.5
+    },
+    {
+      "id": "badge4",
+      "parent": null,
+      "shape": "ellipsoid",
+      "pos": [
+        0.044,
+        1.04,
+        -0.395
+      ],
+      "size": [
+        0.025,
+        0.025,
+        0.018
+      ],
+      "color": "#fff4d8",
+      "metal": 0.5
+    },
+    {
+      "id": "badge5",
+      "parent": null,
+      "shape": "ellipsoid",
+      "pos": [
+        0.088,
+        1.04,
+        -0.395
+      ],
+      "size": [
+        0.025,
+        0.025,
+        0.018
+      ],
+      "color": "#e9b96a",
+      "metal": 0.5
+    },
+    {
+      "id": "badge6",
+      "parent": null,
+      "shape": "ellipsoid",
+      "pos": [
+        0.132,
+        1.04,
+        -0.395
+      ],
+      "size": [
+        0.025,
+        0.025,
+        0.018
+      ],
+      "color": "#fff4d8",
+      "metal": 0.5
+    }
   ],
-  "details": []
+  "details": [
+    {
+      "on": "pack",
+      "type": "bolts",
+      "count": 18,
+      "length": 0.008,
+      "width": 0.018,
+      "color": "#fce2ab",
+      "region": "back"
+    }
+  ]
 }

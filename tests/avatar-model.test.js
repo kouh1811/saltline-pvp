@@ -18,3 +18,6 @@ test('graph validator bounds repeated child and surface expansion and rejects ex
  const nodes=[{...recipe.nodes[0],repeat:{count:12,axis:'y',angle:6.28}},{...recipe.nodes[0],id:'child',parent:'body',repeat:{count:12,axis:'y',angle:6.28},mirror:true}];assert.throws(()=>validate({...recipe,nodes}),/instances budget/);
  assert.throws(()=>validate({...recipe,nodes:[{...recipe.nodes[0],repeat:{count:12,axis:'y',angle:6.28}}],details:[{on:'body',type:'fur',count:5000,length:.01,width:.01,color:'#ffffff'}]}),/surface budget/);
 });
+test('chat-completions compatibility validates the same declarative graph',async()=>{
+ const requests=[];const gen=createModelGenerator({apiKey:'test',baseURL:'https://example.test/v1',protocol:'chat',model:'chat-model',fetchImpl:async(url,o)=>{requests.push({url,body:JSON.parse(o.body)});return{ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:JSON.stringify(recipe)}}]})};}});assert.deepEqual(await gen('测试机器人'),recipe);assert.match(requests[0].url,/chat\/completions$/);assert.equal(requests[0].body.messages[1].content,'测试机器人');
+});

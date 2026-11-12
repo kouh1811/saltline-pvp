@@ -1,0 +1,12 @@
+import {randomBytes,scryptSync,timingSafeEqual} from 'node:crypto';
+export function hashPassword(password){const salt=randomBytes(16).toString('hex');return salt+':'+scryptSync(password,salt,64).toString('hex');}
+function matches(password,hash){try{const [salt,value]=hash.split(':'),expected=Buffer.from(value,'hex'),actual=scryptSync(password,salt,64);return expected.length===actual.length&&timingSafeEqual(expected,actual);}catch{return false;}}
+export class AdminAuth{
+ constructor(store,{password=process.env.ADMIN_PASSWORD,secure=false}={}){this.store=store;this.secure=secure;this.sessions=new Map();this.attempts=new Map();if(store.key&&!store.passwordHash()&&typeof password==='string'&&password.length>=12&&password.length<=200){store.setPassword(hashPassword(password));store.audit('初始化管理员');}this.enabled=!!store.key&&!!store.passwordHash();}
+ login(password,ip){const now=Date.now();for(const [key,entry]of this.attempts)if(now-entry.start>900000)this.attempts.delete(key);const usage=this.attempts.get(ip)||{start:now,count:0};if(usage.count>=5)throw Object.assign(Error('登录尝试过多，请15分钟后重试'),{status:429});usage.count++;this.attempts.set(ip,usage);if(typeof password!=='string'||password.length>200||!matches(password,this.store.passwordHash()))throw Object.assign(Error('密码不正确'),{status:401});this.attempts.delete(ip);this.prune();const token=randomBytes(32).toString('hex'),session={csrf:randomBytes(24).toString('hex'),expires:now+8*3600000};this.sessions.set(token,session);return{token,...session};}
+ prune(){for(const [token,s]of this.sessions)if(s.expires<Date.now())this.sessions.delete(token);if(this.sessions.size>=100)this.sessions.delete(this.sessions.keys().next().value);}
+ session(req){const token=req.headers.cookie?.match(/(?:^|;\s*)saltline_admin=([a-f0-9]{64})(?:;|$)/)?.[1],session=this.sessions.get(token);if(!session||session.expires<Date.now()){this.sessions.delete(token);return null;}return{token,...session};}
+ cookie(token,clear=false){return'saltline_admin='+token+'; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age='+(clear?'0':'28800')+(this.secure?'; Secure':'');}
+ logout(req){const s=this.session(req);if(s)this.sessions.delete(s.token);}
+ changePassword(oldPassword,password){if(typeof oldPassword!=='string'||oldPassword.length>200||!matches(oldPassword,this.store.passwordHash()))throw Error('当前密码不正确');if(typeof password!=='string'||password.length<12||password.length>200)throw Error('新密码应为12—200个字符');this.store.setPassword(hashPassword(password));this.sessions.clear();this.store.audit('修改管理员密码');}
+}

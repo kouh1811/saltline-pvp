@@ -41,13 +41,15 @@ export class AvatarService{
   if(path.startsWith('/jobs/')&&req.method==='GET'){const job=this.jobs.get(path.slice(6));if(!job||job.owner!==session.id)return response(res,404,{error:'找不到本次生成任务'});return response(res,200,this.publicJob(job));}
   if(req.method!=='POST'||!req.headers['content-type']?.startsWith('application/json'))return response(res,405,{error:'请求方式无效'});
   let data;try{data=await this.readBody(req);if(!data||Array.isArray(data)||typeof data!=='object')throw Error();}catch{return response(res,400,{error:'输入格式无效或描述过长'});}
+  this.context(session.id)?.advancePreparation?.(Date.now());
   const policy=this.config();
   if(path==='/equip'){
    if(Object.keys(data).some(k=>k!=='assetId')||!('assetId'in data)||data.assetId!==null&&(typeof data.assetId!=='string'||!ID.test(data.assetId)))return response(res,400,{error:'角色编号无效'});
    if(data.assetId!==null){if(!policy.customization||!policy.equipment||!policy.inMatch&&this.isPlaying(session.id))return response(res,403,{error:'当前不允许更换角色，请在大厅操作或联系管理员'});try{await this.asset(data.assetId);}catch{return response(res,404,{error:'角色不存在或已被禁用'});}}
-   // Recheck after disk reads: a concurrent administrator change must win.
+   // Recheck after disk reads: deadline fallback and administrator changes must win.
+   this.context(session.id)?.advancePreparation?.(Date.now());
    if(data.assetId!==null&&(!this.config().customization||!this.config().equipment||!this.config().inMatch&&this.isPlaying(session.id)||this.store?.isAssetDisabled(data.assetId)))return response(res,403,{error:'角色设置已更新，请重新选择'});
-   if(data.assetId===null){this.useDefault(session.id);return response(res,200,{assetId:null});}session.preparation=data.assetId===session.generatedAsset?'ready':'pending';this.publish(session);session.equipped=data.assetId;this.onEquip(session.id,data.assetId);return response(res,200,{assetId:data.assetId});
+   if(data.assetId===null){this.useDefault(session.id);return response(res,200,{assetId:null});}session.preparation='ready';session.equipped=data.assetId;this.onEquip(session.id,data.assetId);this.publish(session);return response(res,200,{assetId:data.assetId});
   }
   if(path!=='/generate')return response(res,404,{error:'找不到这个功能'});
   if(Object.keys(data).some(k=>k!=='prompt')||typeof data.prompt!=='string'||data.prompt.trim().length<2||data.prompt.trim().length>300)return response(res,400,{error:'请输入 2—300 字的角色描述；当前仅支持文字'});
@@ -56,13 +58,14 @@ export class AvatarService{
   if(!this.enabled)return response(res,503,{error:'服务器尚未开启 AI 角色生成，请联系房主配置'});
   const now=Date.now();for(const [ip,times]of this.usage)if(now-times.at(-1)>3600000)this.usage.delete(ip);const usage=(this.usage.get(session.ip)||[]).filter(at=>now-at<3600000);this.usage.set(session.ip,usage);
   // 开局准备为每位房间玩家预留一次并发机会，不占通常的 IP 频率预算。
-  const context=this.context(session.id),preparing=context?.phase==='preparing',bypass=preparing&&now<context.preparingEndsAt;
+  const context=this.context(session.id),preparing=!!context&&['preparing','playing'].includes(context.phase)&&!this.isPlaying(session.id),bypass=preparing&&now<context.preparingEndsAt;
   if(session.job&&this.jobs.get(session.job)?.status==='running'||!bypass&&(this.active>=this.limits.concurrent||usage.length>=this.limits.perHour||usage.length&&now-usage.at(-1)<this.limits.cooldownMs))return response(res,429,{error:'生成请求较多，请稍后再试'});
   if(preparing&&!bypass)return response(res,409,{error:'准备时间已结束'});
   if(!bypass)usage.push(now);
   // 新局和默认选择使旧任务失效，晚到的结果不能修改当前局。
   const epoch=session.epoch;
-  const job=this.enqueue(data.prompt.trim(),{owner:session.id,bypass,timeoutMs:Math.min(this.limits.timeoutMs,policy.preview===false||preparing?100000:Infinity,bypass?context.preparingEndsAt-now:Infinity),onReady:()=>{
+  const job=this.enqueue(data.prompt.trim(),{owner:session.id,bypass,timeoutMs:Math.min(this.limits.timeoutMs,policy.preview===false||preparing?120000:Infinity,bypass?context.preparingEndsAt-now:Infinity),onReady:()=>{
+   this.context(session.id)?.advancePreparation?.(Date.now());
    if(session.epoch!==epoch||session.job!==job.id)throw Error('生成已取消');session.generated=true;session.generatedAsset=job.asset.id;
    if(this.config().preview===false&&this.canEquip(job.asset.id)){session.equipped=job.asset.id;session.preparation='ready';this.onEquip(session.id,job.asset.id);}else session.preparation='pending';this.publish(session);
   },onFailed:()=>{if(session.epoch===epoch&&session.job===job.id){session.preparation='failed';this.publish(session);}}});session.job=job.id;session.preparation='generating';this.publish(session);response(res,202,{id:job.id});

@@ -20,12 +20,12 @@ async function fixture(token=null){
  }
  const player={enabled:false,pos:new THREE.Vector3(),vel:new THREE.Vector3(),tuning:{},reset(options){if(options?.pos)this.pos.copy(options.pos);},addShake(){}};
  const G={THREE,player,input:{move:{x:0,y:0},setGameplay(){},exitLock(){},pressed:()=>false},weapon:{debug:{},state:'idle',setVisible(){},reset(){},ammo:30},game:null,enemies:{clear(){}},hud:{setMarkers(){},setObjective(){},setPrompt(){},show(){},reset(){}},camera:{position:new THREE.Vector3(),lookAt(){}},render:{post:{}},combat:{playerShot(){}},events:{on(){},emit(){}},renderer:{domElement:element()},scene:new THREE.Scene(),quality:{name:'low'}};
- const editor={connected:async()=>calls.push('connected'),disconnected:()=>calls.push('disconnected'),setPhase(){},updateConfig(){},isOpen:()=>false};
+ const editor={connected:async()=>calls.push('connected'),disconnected:()=>calls.push('disconnected'),setPhase(){},setPlayerState(){},setPreparation(info){calls.push(info);},updateConfig(){},isOpen:()=>false};
  const location={protocol:'http:',host:'localhost:18453',pathname:'/',href:'http://localhost:18453/'};
  const context={window:{},document:{querySelector:$,getElementById:$,createElement:element,head:element(),addEventListener(){}},location,history:{replaceState(){}},localStorage:{getItem:()=>null,setItem(){}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},navigator:{},URL,URLSearchParams,WebSocket:Socket,performance:{now:()=>now},Date:class extends Date{static now(){return now;}},setTimeout:timer,clearTimeout:id=>timers.delete(id),setInterval(){},addEventListener(){},__avatar:{createAvatar(){},disposeAvatar(){}},__editor:{mountAvatarEditor:()=>editor}};
  const source=(await readFile(new URL('../public/client.js',import.meta.url),'utf8')).replace("import('/avatar/renderer.mjs')","__avatar").replace("import('/avatar/editor.mjs')","__editor");vm.runInNewContext(source,context);await context.window.installPvp(G);
  const advance=ms=>{const end=now+ms;while(true){const entry=[...timers].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!entry)break;timers.delete(entry[0]);now=entry[1].at;entry[1].fn();}now=end;};
- const state=(phase='playing',pos=[0,0,0])=>({type:'state',code:'ABCDEF',host:'original',phase,round:1,now,endsAt:now+300000,players:[{id:'original',name:'A',pos,vel:[0,0,0],health:100,alive:true,kills:2,deaths:1,ammo:30,reloadAt:0,spawnSerial:1,crouching:false,connected:true,yaw:0}]});
+ const state=(phase='playing',pos=[0,0,0])=>({type:'state',code:'ABCDEF',host:'original',phase,round:1,now,endsAt:now+300000,players:[{id:'original',name:'A',pos,vel:[0,0,0],health:100,alive:true,entered:phase==='playing',kills:2,deaths:1,ammo:30,reloadAt:0,spawnSerial:1,crouching:false,connected:true,yaw:0}]});
  return{G,$,sockets,storage,calls,advance,state,location,pvp:context.window.__pvp};
 }
 test('client reconnects with stored identity, refreshes avatar credentials and resumes each phase',async()=>{
@@ -51,8 +51,8 @@ test('real avatar editor clears disconnected status after receiving a new creden
 });
 
 test('preparing keeps lobby visible, counts down and shows eight player capacity',async()=>{
- const f=await fixture(),ws=f.sockets[0];ws.receive({type:'hello',id:'original'});const s=f.state('preparing');s.preparingEndsAt=110000;s.players[0].avatarPreparation='generating';ws.receive(s);
- assert.equal(f.$('#lobby').hidden,false);assert.equal(f.$('#start-game').disabled,true);assert.match(f.$('#wait-hint').textContent,/100 秒/);assert.match(f.$('#roster').children[0].textContent,/生成中/);assert.match(f.$('#population').textContent,/\/8/);f.advance(1000);f.G.game.update(.016);assert.match(f.$('#wait-hint').textContent,/99 秒/);
+ const f=await fixture(),ws=f.sockets[0];ws.receive({type:'hello',id:'original'});const s=f.state('preparing');s.preparingEndsAt=130000;s.players[0].avatarPreparation='generating';ws.receive(s);
+ assert.equal(f.$('#lobby').hidden,false);assert.equal(f.$('#start-game').disabled,true);assert.match(f.$('#wait-hint').textContent,/120 秒/);assert.match(f.$('#roster').children[0].textContent,/生成中/);assert.match(f.$('#population').textContent,/\/8/);f.advance(1000);f.G.game.update(.016);assert.match(f.$('#wait-hint').textContent,/119 秒/);
 });
 
 for(const equipped of [true,false])test(`editor without preview reports actual equipment (${equipped}) and enforces round allowance`,async()=>{
@@ -73,4 +73,21 @@ test('editor polls a failed terminal job once across snapshots and permits a new
  const context={document:{createElement:()=>dialog},localStorage:{getItem:()=>null},Option:class{},cancelAnimationFrame(){},clearTimeout(){},setTimeout(){},fetch:async(url)=>{seen.push(url);return{ok:true,json:async()=>url.endsWith('/generate')?{id:'new-job'}:url.includes('/jobs/')?{status:'failed',error:'生成失败，请重试'}:{enabled:true,customization:true,generation:true,preview:false,equipment:true,inMatch:false}};},createAvatar(){},disposeAvatar(){}};
  const source=(await readFile(new URL('../public/avatar/editor.mjs',import.meta.url),'utf8')).replace("import {createAvatar,disposeAvatar} from './renderer.mjs';",'').replace('export function mountAvatarEditor','function mountAvatarEditor');vm.runInNewContext(source,context);const e=context.mountAvatarEditor({}, {container:node(),triggers:[],getToken:()=> 'token'});await e.connected();const player={avatarGenerated:false,avatarJobId:'failed-job',avatarPreparation:'failed'};
  for(let i=0;i<5;i++){e.setPlayerState(player,1);await new Promise(r=>setImmediate(r));}assert.equal(seen.filter(u=>u.endsWith('/jobs/failed-job')).length,1);assert.equal(elements.get('#avatar-generate').disabled,false);await elements.get('#avatar-generate').onclick();await new Promise(r=>setImmediate(r));assert.equal(seen.filter(u=>u.endsWith('/jobs/new-job')).length,1);assert.equal(elements.get('#avatar-generate').disabled,false);
+});
+
+test('pending player stays in selection while others play; entering closes selection',async()=>{
+ const f=await fixture(),ws=f.sockets[0];ws.receive({type:'hello',id:'original'});const s=f.state();s.preparingEndsAt=130000;s.players[0].entered=false;s.players[0].alive=false;s.players[0].avatarPreparation='pending';
+ s.players.push({...s.players[0],id:'remote',name:'B',entered:true,alive:true});ws.receive(s);
+ assert.equal(f.$('#lobby').hidden,false);assert.equal(f.G.player.enabled,false);assert.equal(f.calls.at(-1).active,true);assert.match(f.calls.at(-1).players[1].name,/B/);
+ s.players[0].entered=true;s.players[0].alive=true;s.players[1].entered=false;s.players[1].alive=false;ws.receive(s);
+ assert.equal(f.$('#lobby').hidden,true);assert.equal(f.calls.at(-1).active,false);assert.equal(f.pvp.remotes.get('remote').root.visible,false);assert.equal(f.G.player.enabled,true);
+});
+
+test('real editor opens selection once per round, shows roster and allows pending players to generate in playing',async()=>{
+ const elements=new Map(),node=()=>({textContent:'',value:'',children:[],hidden:false,setAttribute(){},append(x){this.children.push(x);},replaceChildren(){this.children=[];},addEventListener(){},querySelectorAll:()=>[]});const dialog=node();let opens=0,closes=0;dialog.showModal=()=>{dialog.open=true;opens++;};dialog.close=()=>{dialog.open=false;closes++;};dialog.querySelector=s=>{if(!elements.has(s))elements.set(s,node());return elements.get(s);};
+ const requests=[];const context={document:{createElement:()=>node()},localStorage:{getItem:key=>key==='saltline.avatar.active.v1'?'a'.repeat(32):null},Option:class{},cancelAnimationFrame(){},clearTimeout(){},fetch:async(url)=>(requests.push(url),{ok:true,json:async()=>({enabled:true,customization:true,generation:true,preview:true,equipment:true,inMatch:false})}),createAvatar(){},disposeAvatar(){}};context.document.createElement=tag=>tag==='dialog'?dialog:node();
+ const source=(await readFile(new URL('../public/avatar/editor.mjs',import.meta.url),'utf8')).replace("import {createAvatar,disposeAvatar} from './renderer.mjs';",'').replace('export function mountAvatarEditor','function mountAvatarEditor');vm.runInNewContext(source,context);const e=context.mountAvatarEditor({}, {container:node(),triggers:[],getToken:()=> 'token',onOpen(){},onClose(){}});await e.connected();assert.deepEqual(requests,['/api/avatars/config']);e.updateConfig({preview:false});
+ e.setPhase('playing');e.setPlayerState({entered:false,avatarGenerated:false},1);const info={active:true,seconds:120,round:1,id:'a',host:'a',players:[{id:'a',name:'Alice',connected:true},{id:'b',name:'Bob',entered:true,connected:true}]};e.setPreparation(info);assert.equal(opens,1);assert.equal(dialog.open,true);assert.equal(elements.get('#avatar-generate').disabled,false);assert.match(elements.get('#avatar-countdown').textContent,/120 秒/);assert.match(elements.get('#avatar-roster').children[1].textContent,/Bob.*已进场/);
+ e.setPreparation({...info,seconds:119});assert.equal(opens,1);e.setPlayerState({entered:true,avatarGenerated:false},1);e.setPreparation({...info,active:false});assert.equal(closes,1);assert.equal(dialog.open,false);assert.equal(elements.get('#avatar-generate').disabled,true);e.setPreparation({...info,active:false});assert.equal(opens,1);
+ e.setPhase('preparing');e.setPlayerState({entered:false,avatarGenerated:false},2);e.setPreparation({...info,round:2});assert.equal(opens,2);e.setPreparation({...info,round:2,active:false,seconds:0});assert.equal(closes,2);
 });

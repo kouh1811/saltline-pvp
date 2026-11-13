@@ -1,0 +1,137 @@
+{
+  "recipe": {
+    "version": 2,
+    "name": "v2 regression",
+    "nodes": [
+      {
+        "id": "n0",
+        "parent": null,
+        "shape": "ellipsoid",
+        "pos": [
+          0,
+          1,
+          0
+        ],
+        "size": [
+          0.4,
+          0.7,
+          0.5
+        ],
+        "color": "#4488aa",
+        "metal": 0.3,
+        "rough": 0.7,
+        "mirror": true,
+        "repeat": {
+          "count": 2,
+          "axis": "y",
+          "angle": 3.14
+        }
+      },
+      {
+        "id": "n1",
+        "parent": "n0",
+        "shape": "box",
+        "pos": [
+          0.1,
+          1,
+          0
+        ],
+        "size": [
+          0.4,
+          0.7,
+          0.5
+        ],
+        "color": "#4488aa",
+        "metal": 0.3,
+        "rough": 0.7
+      },
+      {
+        "id": "n2",
+        "parent": null,
+        "shape": "cone",
+        "pos": [
+          0.2,
+          1,
+          0
+        ],
+        "size": [
+          0.4,
+          0.7,
+          0.5
+        ],
+        "color": "#4488aa",
+        "metal": 0.3,
+        "rough": 0.7
+      },
+      {
+        "id": "n3",
+        "parent": null,
+        "shape": "torus",
+        "pos": [
+          0.30000000000000004,
+          1,
+          0
+        ],
+        "size": [
+          0.4,
+          0.7,
+          0.5
+        ],
+        "color": "#4488aa",
+        "metal": 0.3,
+        "rough": 0.7
+      },
+      {
+        "id": "n4",
+        "parent": null,
+        "shape": "tube",
+        "pos": [
+          0.4,
+          1,
+          0
+        ],
+        "size": [
+          0.4,
+          0.7,
+          0.5
+        ],
+        "color": "#4488aa",
+        "metal": 0.3,
+        "rough": 0.7,
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.2,
+            0.5,
+            0
+          ],
+          [
+            0.1,
+            1,
+            0.2
+          ]
+        ],
+        "radii": [
+          0.1,
+          0.07,
+          0.02
+        ]
+      }
+    ],
+    "details": [
+      {
+        "on": "n0",
+        "type": "fur",
+        "count": 3,
+        "length": 0.04,
+        "width": 0.004,
+        "color": "#dddddd"
+      }
+    ]
+  },
+  "fingerprint": "d6a002c21943d9c0f456a145d0283d98168b5381c249355c174b713b072520ea"
+}

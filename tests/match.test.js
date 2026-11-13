@@ -2,8 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Match} from '../server/match.js';
 const map={bounds:{min:[-40,0,-30],max:[40,30,30]},boxes:[],spawns:[[-10,0,0],[10,0,0]]};
-const setup=()=>{const m=new Match('ABCDEF',map);m.join('a','Alice',0);m.join('b','Bob',0);m.start('a',0);for(const [id,x] of [['a',0],['b',5]]){Object.assign(m.players.get(id),{pos:[x,0,0],protectedUntil:0});}return m;};
-test('host starts with at least two players, room capacity is four',()=>{const m=new Match('ABCDEF',map);m.join('a','A',0);assert.throws(()=>m.start('a',0));m.join('b','B',0);assert.throws(()=>m.start('b',0));m.join('c','C',0);m.join('d','D',0);assert.throws(()=>m.join('e','E',0));});
+const setup=()=>{const m=new Match('ABCDEF',map);m.join('a','Alice',0);m.join('b','Bob',0);for(const p of m.players.values())p.avatarPreparation='default';m.start('a',0);for(const [id,x] of [['a',0],['b',5]]){Object.assign(m.players.get(id),{pos:[x,0,0],protectedUntil:0});}return m;};
+test('host starts with at least two players, room capacity is eight',()=>{const m=new Match('ABCDEF',map);m.join('a','A',0);assert.throws(()=>m.start('a',0));m.join('b','B',0);assert.throws(()=>m.start('b',0));m.join('c','C',0);m.join('d','D',0);for(const id of ['e','f','g','h'])m.join(id,id,0);assert.throws(()=>m.join('i','I',0),/8/);});
 test('server confirms damage, fire rate, death and respawn protection',()=>{const m=setup();assert.equal(m.fire('a',[1,0,0],1000).target,'b');assert.equal(m.players.get('b').health,74);assert.equal(m.fire('a',[1,0,0],1001),null);for(let n=1;n<4;n++)m.fire('a',[1,0,0],1000+n*100);assert.equal(m.players.get('a').kills,1);assert.equal(m.players.get('b').deaths,1);assert.equal(m.players.get('b').alive,false);m.tick(1/60,4400);assert.equal(m.players.get('b').alive,true);assert.ok(m.players.get('b').protectedUntil>4400);});
 test('walls stop shots and spawn protection stops damage',()=>{const m=setup();m.map.boxes=[{min:[2,0,-1],max:[3,3,1]}];m.fire('a',[1,0,0],1000);assert.equal(m.players.get('b').health,100);m.map.boxes=[];m.players.get('b').protectedUntil=3000;m.fire('a',[1,0,0],2000);assert.equal(m.players.get('b').health,100);});
 test('server ammo and reload cannot be bypassed by rapid requests',()=>{const m=setup();for(let i=0;i<30;i++)m.fire('a',[0,0,-1],1000+100*i);assert.equal(m.players.get('a').ammo,0);assert.equal(m.fire('a',[0,0,-1],5000),null);m.reload('a',5000);m.reload('a',5100);m.tick(.016,6000);assert.equal(m.players.get('a').ammo,0);m.tick(.016,7800);assert.equal(m.players.get('a').ammo,30);});
@@ -20,4 +20,23 @@ test('shotTime clamps old and future timestamps and never rewinds a previous lif
  const m=setup(),a=m.players.get('a'),b=m.players.get('b');m.tick(0,1000);b.pos=[5,0,5];m.tick(0,1050);m.tick(0,1300);
  assert.equal(m.fire('a',[1,0,0],1300,0).target,null);a.lastShot=-Infinity;assert.equal(m.fire('a',[1,0,0],1300,9999).target,null);
  m.spawn(b,1310);b.pos=[5,0,5];b.protectedUntil=0;a.lastShot=-Infinity;assert.equal(m.fire('a',[1,0,0],1320,1000).target,null);
+});
+
+test('preparation rejects joins and admits a connected ready player without waiting for an offline player',()=>{const m=new Match('ABCDEF',map);m.join('a','A',0);m.join('b','B',0);m.start('a',100);assert.equal(m.phase,'preparing');assert.equal(m.preparingEndsAt,120100);assert.throws(()=>m.join('c','C',0));m.players.get('a').avatarPreparation='default';m.players.get('b').connected=false;m.tick(0,101);assert.equal(m.phase,'playing');});
+
+test('first ready player starts the clock; later entrants never reset earlier players',()=>{
+ const m=new Match('ABCDEF',map);m.join('a','A',0);m.join('b','B',0);m.start('a',100);
+ const a=m.players.get('a'),b=m.players.get('b');a.avatarPreparation='default';m.tick(0,200);
+ assert.equal(m.phase,'playing');assert.equal(m.endsAt,300200);assert.equal(a.entered,true);assert.equal(b.entered,false);assert.equal(b.alive,false);assert.equal(m.preparingEndsAt,120100);
+ a.kills=3;a.pos=[1,0,2];const serial=a.spawnSerial;b.avatarPreparation='ready';m.tick(0,500);
+ assert.equal(b.entered,true);assert.equal(b.kills,0);assert.equal(a.kills,3);assert.deepEqual(a.pos,[1,0,2]);assert.equal(a.spawnSerial,serial);assert.equal(m.endsAt,300200);assert.equal(m.preparingEndsAt,0);
+});
+test('deadline defaults connected entrants and a disconnected player only on reconnect',()=>{
+ const m=new Match('ABCDEF',map);for(const id of ['a','b','c'])m.join(id,id,0);m.start('a',0);m.players.get('c').connected=false;
+ m.tick(0,119999);assert.equal(m.phase,'preparing');m.tick(0,120000);assert.equal(m.phase,'playing');assert.equal(m.endsAt,420000);assert.equal(m.players.get('b').avatarPreparation,'default');assert.equal(m.players.get('c').entered,false);
+ m.players.get('c').connected=true;m.advancePreparation(120001);assert.equal(m.players.get('c').entered,true);assert.equal(m.players.get('c').avatarPreparation,'default');
+});
+test('pending players cannot fire, reload, respawn or be attacked',()=>{
+ const m=new Match('ABCDEF',map);m.join('a','A',0);m.join('b','B',0);m.start('a',0);const a=m.players.get('a'),b=m.players.get('b');a.avatarPreparation='default';m.tick(0,1);a.pos=[0,0,0];b.pos=[5,0,0];a.protectedUntil=b.protectedUntil=0;b.ammo=1;
+ assert.equal(m.fire('b',[-1,0,0],3000),null);m.reload('b',3000);assert.equal(b.reloadAt,0);assert.equal(m.fire('a',[1,0,0],3000).target,null);m.tick(0,4000);assert.equal(b.alive,false);
 });

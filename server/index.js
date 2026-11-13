@@ -19,13 +19,13 @@ export function createGameServer(options={}){
  if(!options.tls&&!!process.env.TLS_CERT!==!!process.env.TLS_KEY)throw Error('TLS_CERT and TLS_KEY must be set together');
  const tls=options.tls||(process.env.TLS_CERT?{cert:readFileSync(process.env.TLS_CERT),key:readFileSync(process.env.TLS_KEY)}:null);
  const store=new ConfigStore({path:options.controlDbPath||(options.avatarDataDir?join(String(options.avatarDataDir),'control.sqlite'):fileURLToPath(new URL('./data/control.sqlite',import.meta.url))),key:options.controlKey,env:options.controlEnv||process.env});
- const avatars=new AvatarService({store,modelFetch:options.modelFetch,isPlaying:id=>[...rooms.values()].some(r=>r.phase==='playing'&&r.players.has(id)),generate:options.avatarGenerate,dataDir:options.avatarDataDir,limits:options.avatarLimits,onEquip:(id,assetId)=>{for(const room of rooms.values()){const p=room.players.get(id);if(p){p.avatarId=assetId;broadcast(room,room.snapshot(Date.now()));break;}}}});
+ const avatars=new AvatarService({context:id=>[...rooms.values()].find(r=>r.players.has(id)),onState:(id,state)=>{for(const room of rooms.values()){const p=room.players.get(id);if(p){Object.assign(p,state);broadcast(room,room.snapshot(Date.now()));break;}}},store,modelFetch:options.modelFetch,isPlaying:id=>[...rooms.values()].some(r=>r.phase==='playing'&&r.players.get(id)?.entered),generate:options.avatarGenerate,dataDir:options.avatarDataDir,limits:options.avatarLimits,onEquip:(id,assetId)=>{for(const room of rooms.values()){const p=room.players.get(id);if(p){p.avatarId=assetId;broadcast(room,room.snapshot(Date.now()));break;}}}});
  const onConfig=()=>{avatars.applyPolicy();for(const ws of sockets.values())send(ws,{type:'avatarConfig',config:avatars.config()});};
  const admin=new AdminController({store,avatars,rooms,sockets,onConfig,password:options.adminPassword,secure:options.adminSecure??process.env.ADMIN_COOKIE_SECURE==='1',trustProxy,fetchImpl:options.modelFetch});
  const handler=async(req,res)=>{try{
   req.isHttps=!!req.socket.encrypted||trustProxy&&req.headers['x-forwarded-proto']==='https';if(hsts&&req.isHttps)res.setHeader('strict-transport-security','max-age=86400');
   const url=new URL(req.url,'http://localhost');if(url.pathname.startsWith('/api/admin')){await admin.handle(req,res,url);return;}if(url.pathname.startsWith('/api/avatars')){await avatars.handle(req,res,url);return;}if(url.pathname==='/health'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,rooms:rooms.size}));return;}
-  const files={'/admin':'admin/index.html','/admin/':'admin/index.html','/admin/admin.js':'admin/admin.js','/admin/admin.css':'admin/admin.css','/admin/preview.js':'admin/preview.js','/vendor/three.js':'../node_modules/three/build/three.module.js','/avatar/schema.mjs':'avatar/schema.mjs','/avatar/renderer.mjs':'avatar/renderer.mjs','/avatar/editor.mjs':'avatar/editor.mjs','/avatar/avatar.css':'avatar/avatar.css','/':'index.html','/index.html':'index.html','/client.js':'client.js','/pvp.css':'pvp.css'};const file=files[url.pathname];if(!file){res.writeHead(404);res.end('Not found');return;}
+  const files={'/admin':'admin/index.html','/admin/':'admin/index.html','/admin/admin.js':'admin/admin.js','/admin/admin.css':'admin/admin.css','/admin/preview.js':'admin/preview.js','/vendor/three.js':'../node_modules/three/build/three.module.js','/avatar/schema.mjs':'avatar/schema.mjs','/avatar/renderer.mjs':'avatar/renderer.mjs','/avatar/editor.mjs':'avatar/editor.mjs','/avatar/quality.mjs':'avatar/quality.mjs','/avatar/surfaces.mjs':'avatar/surfaces.mjs','/avatar/avatar.css':'avatar/avatar.css','/':'index.html','/index.html':'index.html','/client.js':'client.js','/pvp.css':'pvp.css'};const file=files[url.pathname];if(!file){res.writeHead(404);res.end('Not found');return;}
   const body=await readFile(new URL(file,root));res.writeHead(200,{'content-type':/\.(js|mjs)$/.test(file)?'text/javascript; charset=utf-8':file.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8','cache-control':'no-cache','x-content-type-options':'nosniff'});res.end(body);
  }catch{res.writeHead(500);res.end('Server error');}};
  const server=tls?https.createServer(tls,handler):http.createServer(handler);
@@ -43,13 +43,13 @@ export function createGameServer(options={}){
      if(room)throw Error('已经在房间中');const found=typeof data.token==='string'?sessions.get(data.token):null;
      if(!found||found.expires<=now){if(found)removeSession(found);throw Error('房间恢复已失效，请返回大厅');}
      const old=sockets.get(found.id);avatars.unregister(id);sockets.delete(id);id=found.id;room=found.room;session=found;clearTimeout(session.timer);session.expires=Infinity;sockets.set(id,ws);if(old&&old!==ws)old.close(4001,'Session replaced');
-     room.players.get(id).connected=true;const avatarToken=avatars.rebind(id);send(ws,{type:'resumed',id,code:room.code,resumeToken:session.token,avatarToken});broadcast(room,room.snapshot(now));return;
+     room.players.get(id).connected=true;room.advancePreparation(now);const avatarToken=avatars.rebind(id);send(ws,{type:'resumed',id,code:room.code,resumeToken:session.token,avatarToken});broadcast(room,room.snapshot(now));return;
     }
     if(data.type==='create'||data.type==='join'){
      if(room)throw Error('已经在房间中');
-     if(data.type==='create'){if(rooms.size>=100)throw Error('房间数量已达上限');let code;do{code=randomBytes(3).toString('hex').toUpperCase();}while(rooms.has(code));room=new Match(code,map);rooms.set(code,room);}
+     if(data.type==='create'){if(rooms.size>=100)throw Error('房间数量已达上限');let code;do{code=randomBytes(3).toString('hex').toUpperCase();}while(rooms.has(code));room=new Match(code,map);room.onPreparationTimeout=id=>avatars.useDefault(id);rooms.set(code,room);}
      else{room=rooms.get(String(data.code||'').trim().toUpperCase());if(!room)throw Error('找不到这个房间，请检查房间码');}
-     try{room.join(id,data.name,now);room.players.get(id).avatarId=avatars.equipped(id);}catch(e){room=null;throw e;}
+     try{room.join(id,data.name,now);room.players.get(id).avatarId=avatars.equipped(id);Object.assign(room.players.get(id),avatars.state(avatars.sessions.get(id)));}catch(e){room=null;throw e;}
      session={id,room,token:randomBytes(32).toString('hex'),expires:Infinity,timer:null};sessions.set(session.token,session);
      send(ws,{type:'joined',id,code:room.code,resumeToken:session.token});broadcast(room,room.snapshot(now));return;
     }
@@ -59,7 +59,7 @@ export function createGameServer(options={}){
     if(data.type==='input')room.input(id,data,now);
     else if(data.type==='fire'){const event=room.fire(id,data.dir,now,data.shotTime);if(event)broadcast(room,event);}
     else if(data.type==='reload')room.reload(id,now);
-    else if(data.type==='start'){room.start(id,now);broadcast(room,room.snapshot(now));}
+    else if(data.type==='start'){if(id===room.host&&room.phase==='finished'&&room.players.size>=2){for(const p of room.players.values())avatars.reset(p.id);}room.start(id,now);broadcast(room,room.snapshot(now));}
    }catch(e){send(ws,{type:'error',message:e instanceof SyntaxError?'无法识别的消息':e.message});}
   });
   ws.on('close',()=>{if(sockets.get(id)!==ws)return;sockets.delete(id);if(!session){avatars.unregister(id);return;}if(closing)return;
